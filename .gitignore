@@ -1,0 +1,21 @@
+# Python packaging and local environments
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+
+# Local Trailmem runtime data
+.trailmem/
+
+# Regeneratable Graphify output
+graphify-out/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# OpenKnowledge local runtime data
+.ok/*.db
