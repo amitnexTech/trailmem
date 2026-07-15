@@ -1,11 +1,15 @@
 """Smoke test: setup + doctor against a temp home."""
 
 import os
-import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-shutil.rmtree("/tmp/tm-test-home", ignore_errors=True)
+# Wipe DB + config but KEEP models/ — no 130MB re-download per run.
+for f in ("trailmem.db", "trailmem.db-wal", "trailmem.db-shm", "config.json", "export.json"):
+    try:
+        os.remove(f"/tmp/tm-test-home/{f}")
+    except FileNotFoundError:
+        pass
 os.environ["TRAILMEM_HOME"] = "/tmp/tm-test-home"
 os.environ["TRAILMEM_DB"] = "/tmp/tm-test-home/trailmem.db"
 
@@ -51,6 +55,21 @@ def run() -> None:
     assert r3["outcome"] == "stored" and r3["linked"]["target"] == r["node_id"]
     row = conn.execute("SELECT pinned FROM memories WHERE node_id=?", (r3["node_id"],)).fetchone()
     assert row["pinned"] == 1
+
+    # semantic dedup bands — only when the real model is available
+    from trailmem import embeddings
+    if embeddings.available():
+        paraphrase = "Use QTcpSocket direct connection for aria2 JSON-RPC rather than a WebSocket wrapper."
+        rp = store(conn, paraphrase, "aria2 paraphrase", "decision", agent_type="claude")
+        assert rp["outcome"] == "blocked_near_dup", f"paraphrase should hit band 2: {rp}"
+        assert rp["duplicate"]["id"] == r["id"]
+        rf = store(conn, paraphrase, "aria2 paraphrase", "decision", agent_type="claude", force=True)
+        assert rf["outcome"] == "stored", "force must bypass the block"
+        assert rf.get("related_candidates"), "store-time link assistance must surface candidates"
+        conn.execute("DELETE FROM memories WHERE node_id=?", (rf["node_id"],))
+        conn.execute("DELETE FROM memories_fts WHERE node_id=?", (rf["node_id"],))
+        conn.execute("DELETE FROM memories_vec WHERE node_id=?", (rf["node_id"],))
+        conn.commit()
 
     # FTS synced on store
     hit = conn.execute("SELECT node_id FROM memories_fts WHERE memories_fts MATCH 'aria2'").fetchone()
@@ -150,6 +169,49 @@ def run() -> None:
     assert edge_count(conn, r4["node_id"]) == 0
 
     conn.close()
+
+    # --- CLI surface (in-process, FTS-only env) ---
+    import contextlib
+    import io
+
+    os.environ["TRAILMEM_AGENT_TYPE"] = "claude"
+
+    def cli(*argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = main(list(argv))
+        return code, buf.getvalue()
+
+    code, out = cli("store", "CLI smoke memory content, long enough to pass the fifty char validation floor.",
+                    "--title", "CLI smoke entry", "--type", "task")
+    assert code == 0 and "Stored #" in out, out
+    code, out = cli("store", "CLI smoke memory content, long enough to pass the fifty char validation floor.",
+                    "--title", "CLI smoke entry", "--type", "task")
+    assert code == 3, "exact dup must exit 3"
+    code, out = cli("list", "--tasks")
+    assert code == 0 and "CLI smoke entry" in out
+    code, out = cli("query", "smoke validation")
+    assert code == 0 and "CLI smoke entry" in out
+    code, out = cli("stats")
+    assert code == 0 and "memories" in out
+    code, out = cli("welcome", "--force")
+    assert code == 0 and "📊" in out
+    code, out = cli("model", "list")
+    assert code == 0 and "bge-small" in out
+    code, out = cli("maintain")
+    assert code == 0 and "dry-run" in out
+    code, out = cli("export", "/tmp/tm-test-home/export.json")
+    assert code == 0
+    code, out = cli("hook", "session-start")
+    assert code == 0 and "📊" in out, "hook must print welcome"
+    code, out = cli("hook", "session-stop")
+    assert code == 0
+    # hook must exit 0 even when things break (point at unwritable db)
+    os.environ["TRAILMEM_DB"] = "/proc/nonexistent/db.sqlite"
+    code, _ = cli("hook", "session-start")
+    assert code == 0, "hook must NEVER fail the host session"
+    os.environ["TRAILMEM_DB"] = "/tmp/tm-test-home/trailmem.db"
+
     print("SMOKE OK")
 
 
