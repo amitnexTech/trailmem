@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trailmem"
+version = "0.1.0"
+description = "Local-first, graph-linked persistent memory for AI coding agents (MCP server + CLI)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Amit", email = "amit@example.com" }]
+keywords = ["mcp", "memory", "ai-agents", "knowledge-graph", "sqlite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "sqlite-vec<0.2.0",
+    "onnxruntime",
+    "tokenizers",
+    "numpy",
+    "orjson",
+    "mcp",
+]
+
+[project.urls]
+Homepage = "https://github.com/amit/trailmem"
+
+[project.scripts]
+trailmem = "trailmem.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["trailmem"]

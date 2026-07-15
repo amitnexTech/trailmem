@@ -20,3 +20,6 @@ graphify-out/
 # OpenKnowledge local runtime data
 .ok/*.db
 .ok/local/
+
+# Claude Code local settings
+.claude/settings.local.json
