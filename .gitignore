@@ -19,3 +19,4 @@ graphify-out/
 
 # OpenKnowledge local runtime data
 .ok/*.db
+.ok/local/
