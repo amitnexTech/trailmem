@@ -126,3 +126,12 @@ Reuse the same content-comparison signals the similarity pass already produces. 
 | >0.92 with force=true | Accepted, no warning |
 | Archived memory similar to new | Still warn/block (archived not deleted, still searchable) |
 | Superseded memory similar to new | Lower priority in comparison (active memories checked first) |
+
+---
+
+## Related specs
+
+- [[schema]] — `content_hash`, `memories_vec`, per-model thresholds, and embedding config.
+- [[mcp]] — `trailmem_store` processing order that runs this policy; error-vs-business-outcome rules.
+- [[evolution]] — when a near-duplicate should become a `supersedes`/`evolves` edge instead of a new record.
+- [[welcome]] — orphan/`[↔N]` signals that the store-time link assistance feeds.

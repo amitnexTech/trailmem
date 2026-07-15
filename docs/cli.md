@@ -207,3 +207,13 @@ trailmem export --format json
 | 2 | Validation error (content too short, missing title, etc) |
 | 3 | Duplicate detected (exact hash match) |
 | 4 | Near-duplicate blocked (>0.92 similarity, use --force) |
+
+---
+
+## Related specs
+
+- [[mcp]] — the six MCP tools that share this CLI's validation/storage paths.
+- [[schema]] — data contracts; `model`/`reindex` commands map to the embedding config.
+- [[dedup]] — `similar` command + exit codes 3/4 behavior.
+- [[hooks]] — `trailmem hook session-start/session-stop` host integration.
+- [[migration]] — one-time seed runbook built on `store`/`link`.

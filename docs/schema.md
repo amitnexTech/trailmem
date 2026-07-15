@@ -315,3 +315,13 @@ CREATE UNIQUE INDEX idx_edges_unique ON edges(source_node_id, target_node_id, ed
 | **query result** | access_count += 1 + last_accessed = now (welcome NOT counted) |
 | **every connection** | PRAGMA foreign_keys = ON — first line |
 | **superseded_by lookup** | No column — derive: SELECT source FROM edges WHERE target=? AND edge_type='supersedes' |
+
+---
+
+## Related specs
+
+- [[welcome]] — how sessions/pinned/boundary tables drive the briefing.
+- [[dedup]] — content_hash + embedding duplicate policy on store.
+- [[evolution]] — status/archive_reason/supersedes edge lifecycle.
+- [[mcp]] — the tool surface that writes this schema.
+- [[cli]] — command surface, including `trailmem model` + `reindex` for the embedding config above.

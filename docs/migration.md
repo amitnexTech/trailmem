@@ -81,3 +81,12 @@ trailmem dashboard         # visual check
 ## Timeline
 
 This is a ~30 minute manual job for ~30 memories. Not worth automating.
+
+---
+
+## Related specs
+
+- [[cli]] — `trailmem store` / `trailmem link` commands the seed runs through.
+- [[schema]] — field contracts every seeded record must satisfy.
+- [[dedup]] — the duplicate policy that applies during seeding (no bypass).
+- [[evolution]] — recreating only meaningful `supersedes`/`evolves`/`related` edges.

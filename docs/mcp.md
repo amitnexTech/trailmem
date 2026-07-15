@@ -294,3 +294,14 @@ errors per Cross-Tool Error Handling — not plain-text responses.)
 ### Hook Integration
 Session lifecycle hooks documented separately in [[hooks]]. MCP spec defines tools only.
 Hook registration = per-host config (Claude Code settings.json, Kiro .kiro/settings/, Codex hooks.json).
+
+---
+
+## Related specs
+
+- [[schema]] — tables/contracts these tools read and write.
+- [[welcome]] — the seven-section briefing `trailmem_welcome` renders.
+- [[dedup]] — `trailmem_store` duplicate bands + store-time link assistance.
+- [[evolution]] — supersede/archive semantics behind `store`/`edit`.
+- [[hooks]] — session lifecycle integration.
+- [[cli]] — the equivalent command-line surface.

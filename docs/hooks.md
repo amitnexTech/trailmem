@@ -75,3 +75,12 @@ Other hosts (Kiro/Codex/OpenCode) register the same two commands in their own ho
 - Auto-store memories on any lifecycle event (junk factory — locked Q10).
 - Block, delay, or fail the host session (always exit 0).
 - Instruct the agent to relay marketing/upsell text (nagware — the reason this project exists).
+
+---
+
+## Related specs
+
+- [[welcome]] — the exact briefing path SessionStart invokes; boundary + anti-bloat behavior.
+- [[mcp]] — process/concurrency contracts (stdio, WAL, `BEGIN IMMEDIATE`) the hook shares.
+- [[schema]] — `sessions` table the stop-hook updates.
+- [[cli]] — `trailmem hook session-start/session-stop` entry the host registers.

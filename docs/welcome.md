@@ -191,3 +191,12 @@ Higher section wins. No duplicate rendering. Clean output.
 - Project-scoped: current_cwd + global (NULL) only. Other projects filtered out.
 - IDs always shown: `#id [node_id] [↔N]` format on every memory everywhere
 - Session reconnect: `started_at` never clobbered (ON CONFLICT updates last_seen_at only)
+
+---
+
+## Related specs
+
+- [[schema]] — `sessions` table, boundary columns (`started_at`/`last_seen_at`/`last_welcome_at`), and pinned/constraint fields this briefing reads.
+- [[hooks]] — SessionStart invokes this exact welcome path; anti-bloat state is shared.
+- [[mcp]] — `trailmem_welcome` tool parameters and the short-vs-full contract.
+- [[dedup]] — the `[↔N]` edge-count and orphan signals surfaced in sections.

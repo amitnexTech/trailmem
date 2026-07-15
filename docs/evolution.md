@@ -124,3 +124,12 @@ All statuses searchable — archived/superseded = "negative knowledge" (what NOT
 3. Cannot archive without both. Error returned if missing.
 4. Archived memories remain searchable (lower priority).
 5. Dashboard shows archived as greyed/dimmed with reason visible.
+
+---
+
+## Related specs
+
+- [[schema]] — `status`, `archive_reason`, `edges` table, and the `supersedes`-edge derivation of `superseded_by`.
+- [[dedup]] — near-duplicate outcomes that trigger a supersede instead of a new record.
+- [[mcp]] — `trailmem_store(supersedes=…)` one-call flow and `trailmem_edit` archive path.
+- [[dashboard]] — how archived/superseded records render and stay navigable.
