@@ -2,7 +2,9 @@
 
 ## Overview
 
-trailmem uses SQLite with 5 tables: `memories` (core), `edges` (relationships), `memories_vec` (embeddings), `memories_fts` (full-text search), `sessions` (boundary tracking).
+trailmem uses SQLite with 5 core tables: `memories` (core), `edges` (relationships), `memories_vec` (embeddings), `memories_fts` (full-text search), `sessions` (boundary tracking) — plus 2 dashboard support tables (`dashboard_state`, `dashboard_events`) populated by triggers for the [[dashboard]] SSE feed.
+
+**Migrations:** `init_db` is idempotent (`CREATE ... IF NOT EXISTS`), so NEW tables/indexes/triggers self-heal on old DBs. Changes to EXISTING tables (e.g. `ALTER TABLE ... ADD COLUMN`) go in the append-only `MIGRATIONS` list in `schema.py`, tracked via `PRAGMA user_version` — each entry runs exactly once, in order, on every install. Never edit or reorder shipped entries.
 
 ## Connection Setup
 
