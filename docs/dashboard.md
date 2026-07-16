@@ -1,6 +1,6 @@
 # trailmem — Dashboard Specification
 
-**Status: design contract.** Build this only after Trailmem core storage, graph operations, and validation APIs exist. The dashboard is a first-party local feature, not a replacement for the six stdio MCP tools.
+**Status: built (2026-07-17), REVIEWED + HARDENED (2026-07-17, commit 4d862c6).** An initial `trailmem/dashboard.py` exists (authored by Amit, wired into cli.py). Audit + fresh-install functional test PASS: loopback-only bind, shared store/ops service layer (no direct SQLite writes), zero CDN/external assets, trigger-based revisioned SSE with Last-Event-ID replay + reset-on-gap, core validation on all write flows, no hard-delete in UI. Hardening added during review: Host/Origin loopback validation on every request (blocks DNS rebinding + cross-site CSRF), scope check on edge removal, clean port-in-use error. The dashboard is a first-party local feature, not a replacement for the six stdio MCP tools.
 
 ## Product Goal
 

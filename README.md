@@ -6,14 +6,35 @@ Trailmem gives agents durable cross-session memory without provider lock-in: a l
 
 ## Quick start
 
+Same commands on Windows, macOS, and Linux (pure Python; wheels ship for all three). On some systems use `pip3` or `python -m pip` instead of `pip`.
+
 ```bash
 pip install trailmem
 trailmem setup          # creates ~/.trailmem/, inits DB, downloads the default embedding model
 trailmem doctor         # health check
 
-# Register the MCP server with your agent host, e.g. Claude Code:
-claude mcp add trailmem -- trailmem-mcp
+# Register the MCP server with your agent host(s):
+trailmem integrate      # detects Claude Code / Kiro / Codex / OpenCode, asks before writing any config
 ```
+
+Prefer manual registration? Each host has its own mechanism:
+
+| Host | Manual registration |
+|------|--------------------|
+| Claude Code | `claude mcp add trailmem -- trailmem-mcp` |
+| Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
+| Codex | add an `[mcp_servers.trailmem]` table to `~/.codex/config.toml` |
+| OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
+
+In every case the server command is `trailmem-mcp` (stdio).
+
+### Updating
+
+```bash
+pip install --upgrade trailmem
+```
+
+There is no in-app "update available" notice — trailmem sends no telemetry, by design. Watch the GitHub Releases page instead.
 
 The agent then gets six tools: `trailmem_welcome` (once-per-session briefing), `trailmem_store`, `trailmem_query`, `trailmem_show`, `trailmem_edit`, `trailmem_link`. Everything is also available to humans via the `trailmem` CLI (`store`, `query`, `show`, `list`, `stats`, `link`, `archive`, ...).
 
@@ -36,7 +57,7 @@ trailmem help                # or: trailmem <command> --help
 
 ## Status
 
-Core implemented and tested (schema, store/dedup, query/show, welcome, MCP server, CLI, hooks, model management). Not yet published to PyPI. The design contract lives in [`docs/`](docs/index.md) — schema, welcome lifecycle, duplicate policy, evolution rules, CLI/MCP surfaces, hooks, seeding playbook, and the (deferred) dashboard contract.
+Core implemented and tested (schema, store/dedup, query/show, welcome, MCP server, CLI, hooks, model management, loopback dashboard, host integration). Not yet published to PyPI. The design contract lives in [`docs/`](docs/index.md) — schema, welcome lifecycle, duplicate policy, evolution rules, CLI/MCP surfaces, hooks, seeding playbook, and the dashboard contract.
 
 ## License
 

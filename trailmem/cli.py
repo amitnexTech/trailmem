@@ -9,7 +9,7 @@ import json
 import os
 import sys
 
-from . import __version__, dashboard, embeddings, models, ops, queries, sessions
+from . import __version__, dashboard, embeddings, integrate, models, ops, queries, sessions
 from . import store as store_mod
 from .config import CONFIG_PATH, TRAILMEM_HOME, db_path, load_config, save_config
 from .schema import connect, has_vec, init_db
@@ -340,9 +340,13 @@ def cmd_setup(a) -> int:
         if models.install(cfg["model"]) != 0:
             print("⚠ model download failed — trailmem works in FTS-only mode until "
                   f"`trailmem model install {cfg['model']}` succeeds.")
-    print("MCP registration: add to your host config →")
+    print("MCP registration: run `trailmem integrate` (auto-detect, asks first), or manually →")
     print('  claude mcp add trailmem -- trailmem-mcp')
     return 0
+
+
+def cmd_integrate(a) -> int:
+    return integrate.run()
 
 
 def cmd_doctor(a) -> int:
@@ -558,6 +562,8 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("setup", help="Create ~/.trailmem/, init DB, download model")
     s.set_defaults(func=cmd_setup)
+    s = sub.add_parser("integrate", help="Register MCP with detected agents (asks first)")
+    s.set_defaults(func=cmd_integrate)
     s = sub.add_parser("doctor", help="Health check")
     s.set_defaults(func=cmd_doctor)
 

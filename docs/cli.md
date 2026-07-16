@@ -105,9 +105,21 @@ trailmem import <file.json> --replace  # full overwrite (DOUBLE confirmation!)
 trailmem dashboard
 # Starts web UI at http://127.0.0.1:3800
 
-# Setup (first-time)
+# Setup (first-time) — identical on Windows / macOS / Linux (pure-Python package)
 trailmem setup
-# Creates ~/.trailmem/, downloads embedding model, registers MCP
+# Creates ~/.trailmem/, downloads the default embedding model, prints MCP registration hint.
+# Note: some systems use `pip3` or `python -m pip` instead of `pip`.
+
+# Integrate with agent hosts (auto-detect, permission-gated)
+trailmem integrate
+# Detects installed agents (Claude Code via `claude` on PATH; Kiro / Codex / OpenCode
+# via their MCP config files) and, ONLY after an explicit y/N prompt, writes each host's
+# own MCP config. Per-host config differs: Claude Code uses `claude mcp add`; others get
+# their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem -- trailmem-mcp`.)
+
+# Update to a newer release
+pip install --upgrade trailmem
+# No in-app "update available" notice (no telemetry, by design). Track GitHub Releases.
 
 # Health check
 trailmem doctor

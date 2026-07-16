@@ -207,6 +207,22 @@ def has_vec(conn: sqlite3.Connection) -> bool:
         return False
 
 
+# Post-publish schema migrations. CREATE TABLE/TRIGGER IF NOT EXISTS above
+# already covers NEW objects; this hook exists for changes to EXISTING tables
+# (e.g. ALTER TABLE ... ADD COLUMN). Each entry runs at most once, in order,
+# tracked via PRAGMA user_version. Append only — never edit or reorder shipped
+# entries. Example: "ALTER TABLE memories ADD COLUMN foo TEXT".
+MIGRATIONS: list[str] = []
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    for step, sql in enumerate(MIGRATIONS[version:], start=version + 1):
+        conn.executescript(sql)
+        conn.execute(f"PRAGMA user_version = {step}")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     """Create all tables + indexes. Idempotent."""
     cfg = load_config()
@@ -223,4 +239,5 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute(vec_table_sql(cfg["embedding"]["dimensions"]))
     for idx in INDEXES:
         conn.execute(idx)
+    migrate(conn)
     conn.commit()
