@@ -100,6 +100,35 @@ def _codex_integrate(cmd: str) -> str:
     return f"wrote {path}"
 
 
+def _kilo_detect() -> bool:
+    return (shutil.which("kilo") is not None
+            or (Path.home() / ".kilo" / "bin" / "kilo").exists()
+            or (Path.home() / ".config" / "kilo" / "kilo.jsonc").exists())
+
+
+def _kilo_integrate(cmd: str) -> str:
+    # kilo.jsonc allows comments; never rewrite (and lose) a commented file.
+    path = Path.home() / ".config" / "kilo" / "kilo.jsonc"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            raise RuntimeError(
+                f"{path} contains comments/JSONC — add trailmem under \"mcpServers\" manually: "
+                f'{{"command": "{cmd}", "args": []}}'
+            )
+        if not isinstance(data, dict):
+            data = {}
+    else:
+        data = {}
+    servers = data.setdefault("mcpServers", {})
+    if SERVER_NAME in servers:
+        return "already registered"
+    servers[SERVER_NAME] = {"command": cmd, "args": []}
+    _write_json(path, data)
+    return f"wrote {path}"
+
+
 def _opencode_detect() -> bool:
     return (shutil.which("opencode") is not None
             or (Path.home() / ".config" / "opencode").is_dir()
@@ -123,6 +152,7 @@ HOSTS = [
     ("Claude Code", _claude_detect, _claude_integrate),
     ("Kiro", _kiro_detect, _kiro_integrate),
     ("Codex", _codex_detect, _codex_integrate),
+    ("Kilo", _kilo_detect, _kilo_integrate),
     ("OpenCode", _opencode_detect, _opencode_integrate),
 ]
 
@@ -131,7 +161,7 @@ def run() -> int:
     cmd = mcp_command()
     found = [(name, fn) for name, detect, fn in HOSTS if detect()]
     if not found:
-        print("No supported agent hosts detected (Claude Code, Kiro, Codex, OpenCode).")
+        print("No supported agent hosts detected (Claude Code, Kiro, Codex, Kilo, OpenCode).")
         print(f"Manual: register `{cmd}` as an MCP server named '{SERVER_NAME}' in your host.")
         return 0
     print("Found: " + ", ".join(name for name, _ in found))

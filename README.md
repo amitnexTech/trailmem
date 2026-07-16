@@ -14,7 +14,7 @@ trailmem setup          # creates ~/.trailmem/, inits DB, downloads the default 
 trailmem doctor         # health check
 
 # Register the MCP server with your agent host(s):
-trailmem integrate      # detects Claude Code / Kiro / Codex / OpenCode, asks before writing any config
+trailmem integrate      # detects Claude Code / Kiro / Codex / Kilo / OpenCode, asks before writing any config
 ```
 
 Prefer manual registration? Each host has its own mechanism:
@@ -24,6 +24,7 @@ Prefer manual registration? Each host has its own mechanism:
 | Claude Code | `claude mcp add trailmem -- trailmem-mcp` |
 | Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
 | Codex | add an `[mcp_servers.trailmem]` table to `~/.codex/config.toml` |
+| Kilo | add `trailmem` under `mcpServers` in `~/.config/kilo/kilo.jsonc` |
 | OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
 
 In every case the server command is `trailmem-mcp` (stdio).

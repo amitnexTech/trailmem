@@ -112,7 +112,7 @@ trailmem setup
 
 # Integrate with agent hosts (auto-detect, permission-gated)
 trailmem integrate
-# Detects installed agents (Claude Code via `claude` on PATH; Kiro / Codex / OpenCode
+# Detects installed agents (Claude Code via `claude` on PATH; Kiro / Codex / Kilo / OpenCode
 # via their MCP config files) and, ONLY after an explicit y/N prompt, writes each host's
 # own MCP config. Per-host config differs: Claude Code uses `claude mcp add`; others get
 # their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem -- trailmem-mcp`.)
