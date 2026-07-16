@@ -9,7 +9,7 @@ import json
 import os
 import sys
 
-from . import __version__, embeddings, models, ops, queries, sessions
+from . import __version__, dashboard, embeddings, models, ops, queries, sessions
 from . import store as store_mod
 from .config import CONFIG_PATH, TRAILMEM_HOME, db_path, load_config, save_config
 from .schema import connect, has_vec, init_db
@@ -231,6 +231,15 @@ def cmd_stats(a) -> int:
             "GROUP BY event_type ORDER BY c DESC"):
         print(f"  {row['event_type']}: {row['c']}")
     return 0
+
+
+def cmd_dashboard(a) -> int:
+    """Start the first-party local dashboard; it is never a public listener."""
+    if not 1 <= a.port <= 65535:
+        raise ValidationError("dashboard port must be between 1 and 65535")
+    project = store_mod.resolve_project(a.project)
+    agent = store_mod.resolve_agent(a.agent or "user")
+    return dashboard.serve(port=a.port, project=project, default_agent=agent)
 
 
 # ---- admin ----
@@ -524,6 +533,12 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("stats", help="Statistics")
     s.set_defaults(func=cmd_stats)
+
+    s = sub.add_parser("dashboard", help="Start the loopback-only local dashboard")
+    s.add_argument("--port", type=int, default=3800)
+    s.add_argument("--project", help="Project scope (use 'global' for global memories only)")
+    s.add_argument("--agent", help="Default attribution for dashboard-created memories")
+    s.set_defaults(func=cmd_dashboard)
 
     s = sub.add_parser("maintain", help="Maintenance (dry-run by default)")
     s.add_argument("--apply", action="store_true")

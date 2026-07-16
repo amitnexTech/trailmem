@@ -69,6 +69,96 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
 )
 """
 
+# Dashboard revisions are written by SQLite triggers, so CLI/MCP/dashboard
+# mutations all reach the same revisioned SSE feed after their transaction.
+DASHBOARD_STATE = """
+CREATE TABLE IF NOT EXISTS dashboard_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    revision INTEGER NOT NULL DEFAULT 0
+)
+"""
+
+DASHBOARD_EVENTS = """
+CREATE TABLE IF NOT EXISTS dashboard_events (
+    revision INTEGER PRIMARY KEY,
+    event TEXT NOT NULL,
+    node_id TEXT,
+    data TEXT
+)
+"""
+
+DASHBOARD_TRIGGERS = [
+    """
+    CREATE TRIGGER IF NOT EXISTS dashboard_memory_created
+    AFTER INSERT ON memories
+    BEGIN
+        UPDATE dashboard_state SET revision = revision + 1 WHERE id = 1;
+        INSERT INTO dashboard_events (revision, event, node_id)
+        SELECT revision, 'memory.created', NEW.node_id FROM dashboard_state WHERE id = 1;
+        DELETE FROM dashboard_events
+        WHERE revision < (SELECT revision - 1000 FROM dashboard_state WHERE id = 1);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS dashboard_memory_updated
+    AFTER UPDATE OF title, content, event_type, pinned, status, archive_reason ON memories
+    WHEN NEW.title IS NOT OLD.title
+      OR NEW.content IS NOT OLD.content
+      OR NEW.event_type IS NOT OLD.event_type
+      OR NEW.pinned IS NOT OLD.pinned
+      OR NEW.status IS NOT OLD.status
+      OR NEW.archive_reason IS NOT OLD.archive_reason
+    BEGIN
+        UPDATE dashboard_state SET revision = revision + 1 WHERE id = 1;
+        INSERT INTO dashboard_events (revision, event, node_id)
+        SELECT revision,
+               CASE WHEN NEW.status IS NOT 'active' AND OLD.status IS 'active'
+                    THEN 'memory.archived' ELSE 'memory.updated' END,
+               NEW.node_id
+        FROM dashboard_state WHERE id = 1;
+        DELETE FROM dashboard_events
+        WHERE revision < (SELECT revision - 1000 FROM dashboard_state WHERE id = 1);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS dashboard_memory_deleted
+    AFTER DELETE ON memories
+    BEGIN
+        UPDATE dashboard_state SET revision = revision + 1 WHERE id = 1;
+        INSERT INTO dashboard_events (revision, event, node_id)
+        SELECT revision, 'memory.deleted', OLD.node_id FROM dashboard_state WHERE id = 1;
+        DELETE FROM dashboard_events
+        WHERE revision < (SELECT revision - 1000 FROM dashboard_state WHERE id = 1);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS dashboard_edge_created
+    AFTER INSERT ON edges
+    BEGIN
+        UPDATE dashboard_state SET revision = revision + 1 WHERE id = 1;
+        INSERT INTO dashboard_events (revision, event, node_id, data)
+        SELECT revision, 'edge.created', NEW.source_node_id,
+               NEW.source_node_id || char(9) || NEW.target_node_id || char(9) || NEW.edge_type || char(9) || NEW.id
+        FROM dashboard_state WHERE id = 1;
+        DELETE FROM dashboard_events
+        WHERE revision < (SELECT revision - 1000 FROM dashboard_state WHERE id = 1);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS dashboard_edge_deleted
+    AFTER DELETE ON edges
+    BEGIN
+        UPDATE dashboard_state SET revision = revision + 1 WHERE id = 1;
+        INSERT INTO dashboard_events (revision, event, node_id, data)
+        SELECT revision, 'edge.deleted', OLD.source_node_id,
+               OLD.source_node_id || char(9) || OLD.target_node_id || char(9) || OLD.edge_type || char(9) || OLD.id
+        FROM dashboard_state WHERE id = 1;
+        DELETE FROM dashboard_events
+        WHERE revision < (SELECT revision - 1000 FROM dashboard_state WHERE id = 1);
+    END;
+    """,
+]
+
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_memories_hash_project ON memories(content_hash, project)",
     "CREATE INDEX IF NOT EXISTS idx_memories_status_pinned ON memories(status, pinned)",
@@ -124,6 +214,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(EDGES)
     conn.execute(SESSIONS)
     conn.execute(FTS)
+    conn.execute(DASHBOARD_STATE)
+    conn.execute(DASHBOARD_EVENTS)
+    conn.execute("INSERT OR IGNORE INTO dashboard_state (id, revision) VALUES (1, 0)")
+    for trigger in DASHBOARD_TRIGGERS:
+        conn.executescript(trigger)
     if cfg["embedding"]["enabled"] and has_vec(conn):
         conn.execute(vec_table_sql(cfg["embedding"]["dimensions"]))
     for idx in INDEXES:
