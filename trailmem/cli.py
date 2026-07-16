@@ -423,8 +423,20 @@ def cmd_hook(a) -> int:
 # ---- parser ----
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="trailmem",
-                                description="Graph-linked persistent memory for AI coding agents")
+    p = argparse.ArgumentParser(
+        prog="trailmem",
+        description="Graph-linked persistent memory for AI coding agents",
+        epilog=(
+            "examples:\n"
+            "  trailmem setup                            first-time setup (config, DB, model)\n"
+            "  trailmem doctor                           health check\n"
+            "  trailmem store --title \"Note\" --type lesson --agent user \"content here\"\n"
+            "  trailmem query \"what did I learn about X\"\n"
+            "  trailmem list                             list stored memories\n"
+            "  trailmem <command> --help                 help for any command\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--version", action="version", version=f"trailmem {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -559,6 +571,10 @@ def main(argv=None) -> int:
     s.add_argument("--agent")
     s.set_defaults(func=cmd_hook)
 
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv or argv[0] in ("help", "--help", "-h"):
+        p.print_help()
+        return 0
     args = p.parse_args(argv)
     try:
         return args.func(args)

@@ -17,6 +17,15 @@ claude mcp add trailmem -- trailmem-mcp
 
 The agent then gets six tools: `trailmem_welcome` (once-per-session briefing), `trailmem_store`, `trailmem_query`, `trailmem_show`, `trailmem_edit`, `trailmem_link`. Everything is also available to humans via the `trailmem` CLI (`store`, `query`, `show`, `list`, `stats`, `link`, `archive`, ...).
 
+Try it from the CLI (note: `content` is positional; `--agent user` for your own notes):
+
+```bash
+trailmem store --title "First note" --type lesson --agent user "Something worth remembering."
+trailmem query "what did I note earlier"
+trailmem list
+trailmem help                # or: trailmem <command> --help
+```
+
 ## Why
 
 - **Local-first.** One SQLite file (`~/.trailmem/trailmem.db`), WAL mode, no cloud, no daemon. Embeddings run locally via ONNX (default: bge-small-en-v1.5, user-swappable with `trailmem model use`).

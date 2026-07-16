@@ -76,6 +76,8 @@ def validate(title: str, content: str, event_type: str, work_type: str | None) -
 
 def resolve_agent(agent_type: str | None, env=os.environ) -> str:
     agent = agent_type or detect_agent(env)
+    if agent in ("human", "me"):
+        agent = "user"
     if not agent:
         raise ValidationError(
             "agent_type could not be determined (no param, no TRAILMEM_AGENT_TYPE, "
