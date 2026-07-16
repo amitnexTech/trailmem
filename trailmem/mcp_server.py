@@ -29,7 +29,7 @@ def _db():
 def _session_ctx(agent_type=None, project=None):
     """Resolve identity + lazily register the session (never sets last_welcome_at)."""
     agent = store_mod.resolve_agent(agent_type)
-    proj = project or os.environ.get("TRAILMEM_PROJECT") or os.getcwd()
+    proj = store_mod.resolve_project(project)
     sid = (os.environ.get("CLAUDE_CODE_SESSION_ID")
            or os.environ.get("KIRO_SESSION_ID")
            or f"pid-{os.getppid()}")

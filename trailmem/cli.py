@@ -24,7 +24,7 @@ def _conn():
 
 def _ctx(agent=None):
     agent = store_mod.resolve_agent(agent)
-    proj = os.environ.get("TRAILMEM_PROJECT") or os.getcwd()
+    proj = store_mod.resolve_project(None)
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("KIRO_SESSION_ID")
     return agent, proj, sid
 

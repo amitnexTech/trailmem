@@ -86,6 +86,13 @@ def resolve_agent(agent_type: str | None, env=os.environ) -> str:
     return agent
 
 
+def resolve_project(project: str | None, env=os.environ) -> str | None:
+    """Resolve project scope. The literal "global" (param or TRAILMEM_PROJECT)
+    maps to NULL = cross-project global scope; otherwise param > env > cwd."""
+    project = project or env.get("TRAILMEM_PROJECT") or os.getcwd()
+    return None if project == "global" else project
+
+
 def _similar(conn: sqlite3.Connection, vec, limit: int = 3) -> list[dict]:
     """Top-N nearest neighbours, active-first. vec0 KNN demands a bare
     ORDER BY distance, so the active-first reorder happens in Python."""
@@ -126,7 +133,7 @@ def store(
 ) -> dict:
     warnings = validate(title, content, event_type, work_type)
     agent = resolve_agent(agent_type, env)
-    project = project or env.get("TRAILMEM_PROJECT") or os.getcwd()
+    project = resolve_project(project, env)
     session_id = session_id or env.get("CLAUDE_CODE_SESSION_ID") or env.get("KIRO_SESSION_ID")
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     cfg = load_config()["embedding"]
