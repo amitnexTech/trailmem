@@ -9,7 +9,7 @@ description = "Local-first, graph-linked persistent memory for AI coding agents 
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-authors = [{ name = "Amit", email = "amit@example.com" }]
+authors = [{ name = "Amit Kushwaha", email = "amitkushwaha2805@gmail.com" }]
 keywords = ["mcp", "memory", "ai-agents", "knowledge-graph", "sqlite"]
 classifiers = [
     "Development Status :: 3 - Alpha",
