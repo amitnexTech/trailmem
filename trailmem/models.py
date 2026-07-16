@@ -67,18 +67,24 @@ def installed(name: str) -> bool:
 
 def install(name: str, path: str | None = None) -> int:
     """Download a registry model, or register a custom ONNX via --path."""
+    if path and name in REGISTRY:
+        print(f"error: '{name}' is a reserved registry model name — give the "
+              f"--path install its own name: trailmem model install <name> --path ...",
+              file=sys.stderr)
+        return 1
     dest = MODELS_DIR / name
-    dest.mkdir(parents=True, exist_ok=True)
     if path:
         src = Path(path)
-        if not src.exists():
-            print(f"error: {path} not found", file=sys.stderr)
+        if not src.is_file():
+            print(f"error: {path} is not a file — pass the model.onnx path "
+                  "(tokenizer.json must sit beside it)", file=sys.stderr)
             return 1
-        (dest / "model.onnx").write_bytes(src.read_bytes())
         tok = src.parent / "tokenizer.json"
         if not tok.exists():
             print(f"error: tokenizer.json expected beside {path}", file=sys.stderr)
             return 1
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "model.onnx").write_bytes(src.read_bytes())
         (dest / "tokenizer.json").write_bytes(tok.read_bytes())
         try:
             from . import embeddings
@@ -95,6 +101,7 @@ def install(name: str, path: str | None = None) -> int:
     if not spec:
         print(f"error: unknown model '{name}'. Known: {', '.join(REGISTRY)}", file=sys.stderr)
         return 1
+    dest.mkdir(parents=True, exist_ok=True)
     for fname, url in spec["files"].items():
         target = dest / fname
         if target.exists():

@@ -388,7 +388,9 @@ def cmd_model(a) -> int:
             print("(embeddings disabled — FTS-only mode)")
         return 0
     if a.model_cmd == "install":
-        return models.install(a.name or "bge-small", a.path)
+        # Default name differs by mode: registry download → default model;
+        # custom --path → 'custom', never a registry name (overwrite guard).
+        return models.install(a.name or ("custom" if a.path else "bge-small"), a.path)
     if a.model_cmd == "use":
         return models.use(a.name)
     if a.model_cmd == "disable":
