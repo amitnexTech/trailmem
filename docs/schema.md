@@ -270,7 +270,7 @@ Open-source tool: the user picks the model. trailmem ships a good default and a 
 | Cost | Local ONNX on CPU, zero API cost, ~130MB on disk, fast enough for per-store top-1 similarity |
 | Balance | 384-dim = fast similarity search + good MTEB quality for its size; English-optimized (fits the English-only content rule) |
 
-Supported out of the box (via `trailmem model install <name>`): `bge-small` (default), `minilm` (lighter, ~200MB RAM), `nomic` (better, 768-dim, ~500MB RAM), custom ONNX (`--path`), or none (`trailmem model disable` → FTS5-only).
+Supported out of the box (via `trailmem model install <name>`): `bge-small` (default), `minilm` (lighter, ~200MB RAM), `nomic` (better, 768-dim, ~500MB RAM), custom ONNX (`--path`; dimensions auto-detected at install and saved to the model dir, no manual config), or none (`trailmem model disable` → FTS5-only).
 
 Rules:
 - Config lives in `~/.trailmem/config.json` (`embedding.model`, `embedding.dimensions`, `embedding.enabled`). Model files under `~/.trailmem/models/`, downloaded by `trailmem setup` / `model install` (checksum-verified). **Never bundled in the pip wheel** (127MB+ would bloat every install and PyPI rejects large wheels).

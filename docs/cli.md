@@ -194,7 +194,7 @@ trailmem export --format json
 | `CLAUDE_CODE_SESSION_ID` | Session tracking | Claude Code sets this |
 | `KIRO_SESSION_ID` | Session tracking | Kiro sets this |
 | `TRAILMEM_DB` | Custom DB path | Default: ~/.trailmem/trailmem.db |
-| `TRAILMEM_PROJECT` | Override project detection | Default: cwd |
+| `TRAILMEM_PROJECT` | Override project detection (value global stores NULL for cross-project scope) | Default: cwd |
 
 ---
 
