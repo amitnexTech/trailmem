@@ -124,7 +124,7 @@ trailmem model list
 trailmem model install bge-small     # default (384-dim, good balance)
 trailmem model install minilm        # lighter (~200MB RAM)
 trailmem model install nomic         # better quality (768-dim, ~500MB RAM)
-trailmem model install --path /path/to/model.onnx   # custom ONNX
+trailmem model install --path /path/to/model.onnx   # custom ONNX; dims auto-detected at install and saved as dims.txt, no manual config edit
 
 # Switch active model
 trailmem model use nomic
