@@ -162,7 +162,8 @@ def run() -> int:
     found = [(name, fn) for name, detect, fn in HOSTS if detect()]
     if not found:
         print("No supported agent hosts detected (Claude Code, Kiro, Codex, Kilo, OpenCode).")
-        print(f"Manual: register `{cmd}` as an MCP server named '{SERVER_NAME}' in your host.")
+        print(f"Any MCP agent works manually: stdio server, command `{cmd}`, no args/env.")
+        print("See the 'Any other MCP agent' section in the README for the config shape.")
         return 0
     print("Found: " + ", ".join(name for name, _ in found))
     print(f"MCP server command: {cmd}")

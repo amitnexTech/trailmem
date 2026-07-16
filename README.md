@@ -27,7 +27,34 @@ Prefer manual registration? Each host has its own mechanism:
 | Kilo | add `trailmem` under `mcpServers` in `~/.config/kilo/kilo.jsonc` |
 | OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
 
-In every case the server command is `trailmem-mcp` (stdio).
+### Any other MCP agent
+
+Trailmem works with **any agent that speaks MCP** — Cursor, Windsurf, Cline, Zed, Gemini CLI, or anything newer. `trailmem integrate` only automates the hosts above; for everything else, register it yourself. You need exactly three facts:
+
+1. **Transport:** stdio (no URL, no port, no HTTP).
+2. **Command:** `trailmem-mcp` — no arguments, no environment variables required.
+3. **Server name:** `trailmem` (any name works; tool names don't depend on it).
+
+Most agents use a JSON block shaped like this (key name varies — `mcpServers`, `mcp`, `servers`):
+
+```json
+{
+  "mcpServers": {
+    "trailmem": {
+      "command": "trailmem-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+If the agent can't find the command, use the absolute path — print it with:
+
+```bash
+which trailmem-mcp        # Windows: where trailmem-mcp
+```
+
+Then restart the agent and check the wiring: the agent should see six `trailmem_*` tools, and calling `trailmem_welcome` should return a briefing. `trailmem doctor` verifies the database side.
 
 ### Updating
 

@@ -116,6 +116,8 @@ trailmem integrate
 # via their MCP config files) and, ONLY after an explicit y/N prompt, writes each host's
 # own MCP config. Per-host config differs: Claude Code uses `claude mcp add`; others get
 # their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem -- trailmem-mcp`.)
+# ANY other MCP agent works manually: stdio transport, command `trailmem-mcp`, no args/env.
+# README has the generic guide ("Any other MCP agent") with the common JSON shape + `which trailmem-mcp` for the absolute path.
 
 # Update to a newer release
 pip install --upgrade trailmem
