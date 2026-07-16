@@ -6,6 +6,7 @@
 
 **Installation:** `pip install trailmem`
 **Binary:** `trailmem`
+**Help:** `trailmem` (no args), `trailmem help`, or `trailmem --help` all print top-level help with usage examples and exit 0; `trailmem <command> --help` shows per-command flags.
 
 ---
 
@@ -24,11 +25,15 @@ trailmem store "content here" \
     --edge-type related \
     --work-type code-written \
     --source "file:docs/apps/jarvis-play.md"
+# Also: --supersedes <ref> --archive-reason "why (min 20 chars)" for one-call supersede,
+#       --modified-files "a.py,b.py", --force to bypass the >0.92 near-dup block (exit 4)
 
 # Edit existing memory
 trailmem edit <ref> --content "updated content"
 trailmem edit <ref> --title "new title"
 trailmem edit <ref> --type lesson
+trailmem edit <ref> --pin            # or --no-pin
+trailmem edit <ref> --status archived --reason "why (min 20 chars)" --link-to <ref>
 
 # Archive (primary way to "remove" — preserves knowledge trail)
 trailmem archive <ref> --reason "replaced by QTcpSocket approach" --link-to <ref>
@@ -55,6 +60,7 @@ trailmem show <ref>
 trailmem query "wayfire compositor"
 trailmem query "aria2" --type lesson
 trailmem query "build" --agent claude
+trailmem query "aria2" --limit 10 --format json   # default limit 5, text output
 
 # Session briefing (same as MCP welcome)
 trailmem welcome
@@ -103,7 +109,8 @@ trailmem import <file.json> --replace  # full overwrite (DOUBLE confirmation!)
 
 # Web Dashboard
 trailmem dashboard
-# Starts web UI at http://127.0.0.1:3800
+# Starts web UI at http://127.0.0.1:3800 (loopback-only, Ctrl-C to stop)
+# Flags: --port N | --project <path|global> | --agent <default attribution for UI-created memories>
 
 # Setup (first-time) — identical on Windows / macOS / Linux (pure-Python package)
 trailmem setup
@@ -126,7 +133,7 @@ pip install --upgrade trailmem
 
 # Health check
 trailmem doctor
-# Verifies: DB, model, MCP registration, indexes
+# Verifies: home + config presence, DB tables, sqlite-vec extension, embedding model
 ```
 
 ### MODEL Management (embedding model is user-configurable)
@@ -209,6 +216,7 @@ trailmem export --format json
 | `CLAUDE_CODE_SESSION_ID` | Session tracking | Claude Code sets this |
 | `KIRO_SESSION_ID` | Session tracking | Kiro sets this |
 | `TRAILMEM_DB` | Custom DB path | Default: ~/.trailmem/trailmem.db |
+| `TRAILMEM_HOME` | Custom home dir (config, models, DB, hooks.log) | Default: ~/.trailmem |
 | `TRAILMEM_PROJECT` | Override project detection (value global stores NULL for cross-project scope) | Default: cwd |
 
 ---

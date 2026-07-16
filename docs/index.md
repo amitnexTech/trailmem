@@ -16,4 +16,4 @@ Trailmem is a local-first, graph-linked persistent memory system for AI coding a
 
 ## Status
 
-All documents are **design specifications**, not shipped behavior. The dashboard document deliberately identifies decisions that need explicit approval before implementation.
+The design is locked (Q1–Q16) and **implemented**: schema, store/dedup, query/show, welcome, MCP server, CLI, hooks, model management, host integration (`trailmem integrate`), and the loopback dashboard (built, audited, hardened) all ship and are verified against these documents. The specs remain the contract — code follows them; when implementation reality diverges, the spec page is updated in the same change.

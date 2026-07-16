@@ -18,7 +18,7 @@ trailmem hook session-stop  [--agent <type>]   # updates sessions.last_seen_at, 
 
 Rules for both:
 - **Always exit 0.** A memory-system failure must never block or delay the agent's session. Errors go to stderr + `~/.trailmem/hooks.log`, stdout stays clean.
-- **Fast timeout:** internally cap at 5s (session-start) / 2s (session-stop). If DB/model unavailable, print nothing and exit 0.
+- **Fast by construction:** welcome needs no embedding model, and DB waits are bounded by `busy_timeout=3000`. The enforced cap is the HOST-side hook timeout (10s start / 5s stop in the registration below) — there is no separate internal timer. If the DB is unavailable, the error goes to `~/.trailmem/hooks.log` and the hook still exits 0.
 - Agent identity: `--agent` flag > `TRAILMEM_AGENT_TYPE` env > auto-detect from env (`CLAUDE_CODE_SESSION_ID` present → claude, `KIRO_SESSION_ID` → kiro, …).
 - Session id: from env (same detection). No session id in env → skip session registration, still print welcome (session-less mode, boundary untracked).
 

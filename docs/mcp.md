@@ -2,7 +2,7 @@
 
 ## Overview
 
-6 MCP tools over stdio transport. Default response = plain text (agent-facing, token-efficient). `format=json` opt-in for dashboard/machine consumers (query + show only).
+6 MCP tools over stdio transport. All responses = plain text (agent-facing, token-efficient). JSON consumers use the CLI (`trailmem query/list/export --format json`) or the dashboard's own service layer — the MCP tools deliberately ship no format parameter (v1).
 
 **Token cost:** ~1200 tokens for tool schemas (vs Omega's ~5000).
 
@@ -270,7 +270,7 @@ errors per Cross-Tool Error Handling — not plain-text responses.)
 
 | Rule | Detail |
 |------|--------|
-| Response format | Plain text default. `format=json` opt-in ONLY on query + show (read-ops). Not on write-ops. |
+| Response format | Plain text always (v1). JSON consumers use CLI `--format json` (query/list/export) or the dashboard service layer. |
 | ID display | Always `#id [node_id]` in every response. Agent can use either for next call. |
 | Edge-count | `[↔N]` shown in query/welcome results. N = total edges. [↔0] = orphan signal. |
 | [pinned] tag | Shown in query results if memory is pinned — signals "load-bearing, don't casually edit". |
