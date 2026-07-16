@@ -14,18 +14,24 @@ trailmem setup          # creates ~/.trailmem/, inits DB, downloads the default 
 trailmem doctor         # health check
 
 # Register the MCP server with your agent host(s):
-trailmem integrate      # detects Claude Code / Kiro / Codex / Kilo / OpenCode, asks before writing any config
+trailmem integrate      # detects installed agent hosts, asks before writing any config
 ```
+
+`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead).
 
 Prefer manual registration? Each host has its own mechanism:
 
 | Host | Manual registration |
 |------|--------------------|
 | Claude Code | `claude mcp add trailmem -- trailmem-mcp` |
-| Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
 | Codex | add an `[mcp_servers.trailmem]` table to `~/.codex/config.toml` |
+| Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
 | Kilo | add `trailmem` under `mcpServers` in `~/.config/kilo/kilo.jsonc` |
 | OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
+| Antigravity | add `trailmem` under `mcpServers` in `~/.gemini/config/mcp_config.json` |
+| Zed | add `trailmem` under `context_servers` in `~/.config/zed/settings.json` |
+| Cursor | add `trailmem` under `mcpServers` in `~/.cursor/mcp.json` |
+| Windsurf | add `trailmem` under `mcpServers` in `~/.codeium/windsurf/mcp_config.json` |
 
 ### Any other MCP agent
 

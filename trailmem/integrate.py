@@ -3,7 +3,14 @@
 Detection is read-only. Nothing is written until the user answers the single
 y/N prompt, and every touched config file gets a one-time ``.bak-trailmem``
 backup first. Claude Code is registered through its own ``claude mcp add``
-CLI; Kiro / Codex / OpenCode get their config file patched in place.
+CLI; Codex gets a TOML table appended; every other host gets its JSON config
+patched in place. A config that fails to parse as plain JSON (JSONC comments,
+trailing commas) is never rewritten — the command reports the exact manual
+entry instead of destroying user content.
+
+Fully generic auto-detection is impossible: MCP has no host registry, and
+every agent picks its own config path, key, and entry shape. New hosts are
+one JSON_HOSTS line (or a detect/integrate pair for exotic formats).
 """
 
 from __future__ import annotations
@@ -32,21 +39,35 @@ def _backup(path: Path) -> None:
         shutil.copy2(path, bak)
 
 
-def _load_json(path: Path) -> dict:
-    try:
-        data = json.loads(path.read_text())
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
 def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _backup(path)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
-# ---- per-host detect / integrate ----
+def _patch_json_map(path: Path, key: str, entry: dict) -> str:
+    """Add SERVER_NAME under `key` in a JSON config file, preserving the rest."""
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            raise RuntimeError(
+                f"{path} is not plain JSON (comments/JSONC?) — add this under "
+                f'"{key}" manually: "{SERVER_NAME}": {json.dumps(entry)}'
+            )
+        if not isinstance(data, dict):
+            data = {}
+    else:
+        data = {}
+    servers = data.setdefault(key, {})
+    if SERVER_NAME in servers:
+        return "already registered"
+    servers[SERVER_NAME] = entry
+    _write_json(path, data)
+    return f"wrote {path}"
+
+
+# ---- hosts with non-JSON registration ----
 
 def _claude_detect() -> bool:
     return shutil.which("claude") is not None
@@ -67,21 +88,6 @@ def _claude_integrate(cmd: str) -> str:
     return "registered via `claude mcp add --scope user`"
 
 
-def _kiro_detect() -> bool:
-    return (Path.home() / ".kiro").is_dir()
-
-
-def _kiro_integrate(cmd: str) -> str:
-    path = Path.home() / ".kiro" / "settings" / "mcp.json"
-    data = _load_json(path)
-    servers = data.setdefault("mcpServers", {})
-    if SERVER_NAME in servers:
-        return "already registered"
-    servers[SERVER_NAME] = {"command": cmd, "args": []}
-    _write_json(path, data)
-    return f"wrote {path}"
-
-
 def _codex_detect() -> bool:
     return (Path.home() / ".codex").is_dir()
 
@@ -100,68 +106,77 @@ def _codex_integrate(cmd: str) -> str:
     return f"wrote {path}"
 
 
-def _kilo_detect() -> bool:
-    return (shutil.which("kilo") is not None
-            or (Path.home() / ".kilo" / "bin" / "kilo").exists()
-            or (Path.home() / ".config" / "kilo" / "kilo.jsonc").exists())
+# ---- hosts registered by patching a JSON config ----
+# name -> (detect, config path, map key, entry factory)
 
+_HOME = Path.home
+_STD = lambda cmd: {"command": cmd, "args": []}  # noqa: E731 - table readability
 
-def _kilo_integrate(cmd: str) -> str:
-    # kilo.jsonc allows comments; never rewrite (and lose) a commented file.
-    path = Path.home() / ".config" / "kilo" / "kilo.jsonc"
-    if path.exists():
-        try:
-            data = json.loads(path.read_text())
-        except json.JSONDecodeError:
-            raise RuntimeError(
-                f"{path} contains comments/JSONC — add trailmem under \"mcpServers\" manually: "
-                f'{{"command": "{cmd}", "args": []}}'
-            )
-        if not isinstance(data, dict):
-            data = {}
-    else:
-        data = {}
-    servers = data.setdefault("mcpServers", {})
-    if SERVER_NAME in servers:
-        return "already registered"
-    servers[SERVER_NAME] = {"command": cmd, "args": []}
-    _write_json(path, data)
-    return f"wrote {path}"
-
-
-def _opencode_detect() -> bool:
-    return (shutil.which("opencode") is not None
-            or (Path.home() / ".config" / "opencode").is_dir()
-            or (Path.home() / ".opencode.json").exists())
-
-
-def _opencode_integrate(cmd: str) -> str:
-    xdg = Path.home() / ".config" / "opencode" / "opencode.json"
-    legacy = Path.home() / ".opencode.json"
-    path = legacy if legacy.exists() and not xdg.exists() else xdg
-    data = _load_json(path)
-    servers = data.setdefault("mcp", {})
-    if SERVER_NAME in servers:
-        return "already registered"
-    servers[SERVER_NAME] = {"type": "local", "command": [cmd], "enabled": True}
-    _write_json(path, data)
-    return f"wrote {path}"
-
-
-HOSTS = [
-    ("Claude Code", _claude_detect, _claude_integrate),
-    ("Kiro", _kiro_detect, _kiro_integrate),
-    ("Codex", _codex_detect, _codex_integrate),
-    ("Kilo", _kilo_detect, _kilo_integrate),
-    ("OpenCode", _opencode_detect, _opencode_integrate),
+JSON_HOSTS = [
+    ("Kiro",
+     lambda: (_HOME() / ".kiro").is_dir(),
+     lambda: _HOME() / ".kiro" / "settings" / "mcp.json",
+     "mcpServers", _STD),
+    ("Kilo",
+     lambda: (shutil.which("kilo") is not None
+              or (_HOME() / ".kilo" / "bin" / "kilo").exists()
+              or (_HOME() / ".config" / "kilo" / "kilo.jsonc").exists()),
+     lambda: _HOME() / ".config" / "kilo" / "kilo.jsonc",
+     "mcpServers", _STD),
+    ("OpenCode",
+     lambda: (shutil.which("opencode") is not None
+              or (_HOME() / ".config" / "opencode").is_dir()
+              or (_HOME() / ".opencode.json").exists()),
+     lambda: (_HOME() / ".opencode.json"
+              if (_HOME() / ".opencode.json").exists()
+              and not (_HOME() / ".config" / "opencode" / "opencode.json").exists()
+              else _HOME() / ".config" / "opencode" / "opencode.json"),
+     "mcp", lambda cmd: {"type": "local", "command": [cmd], "enabled": True}),
+    ("Antigravity",
+     lambda: ((_HOME() / ".antigravity-ide").exists()
+              or (_HOME() / ".gemini" / "antigravity-cli").exists()
+              or (_HOME() / ".gemini" / "antigravity-ide").exists()),
+     lambda: _HOME() / ".gemini" / "config" / "mcp_config.json",
+     "mcpServers", _STD),
+    ("Zed",
+     lambda: (shutil.which("zed") is not None
+              or (_HOME() / ".config" / "zed").is_dir()),
+     lambda: _HOME() / ".config" / "zed" / "settings.json",
+     "context_servers", lambda cmd: {"source": "custom", "command": cmd, "args": []}),
+    ("Cursor",
+     lambda: (_HOME() / ".cursor").is_dir(),
+     lambda: _HOME() / ".cursor" / "mcp.json",
+     "mcpServers", _STD),
+    ("Windsurf",
+     lambda: (_HOME() / ".codeium" / "windsurf").is_dir(),
+     lambda: _HOME() / ".codeium" / "windsurf" / "mcp_config.json",
+     "mcpServers", _STD),
 ]
+
+
+def _hosts() -> list[tuple]:
+    hosts = [
+        ("Claude Code", _claude_detect, _claude_integrate),
+        ("Codex", _codex_detect, _codex_integrate),
+    ]
+    for name, detect, path, key, entry in JSON_HOSTS:
+        hosts.append((
+            name, detect,
+            lambda cmd, path=path, key=key, entry=entry:
+                _patch_json_map(path(), key, entry(cmd)),
+        ))
+    return hosts
+
+
+HOSTS = _hosts()
 
 
 def run() -> int:
     cmd = mcp_command()
     found = [(name, fn) for name, detect, fn in HOSTS if detect()]
     if not found:
-        print("No supported agent hosts detected (Claude Code, Kiro, Codex, Kilo, OpenCode).")
+        print("No supported agent hosts detected "
+              "(" + ", ".join(name for name, _, _ in HOSTS) + ").")
         print(f"Any MCP agent works manually: stdio server, command `{cmd}`, no args/env.")
         print("See the 'Any other MCP agent' section in the README for the config shape.")
         return 0
