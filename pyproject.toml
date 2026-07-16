@@ -35,3 +35,6 @@ trailmem-mcp = "trailmem.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["trailmem"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["CLAUDE.md", ".ok", ".gitignore", ".claude"]
