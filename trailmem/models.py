@@ -71,7 +71,15 @@ def install(name: str, path: str | None = None) -> int:
             print(f"error: tokenizer.json expected beside {path}", file=sys.stderr)
             return 1
         (dest / "tokenizer.json").write_bytes(tok.read_bytes())
-        print(f"installed custom model '{name}' from {path}")
+        try:
+            from . import embeddings
+            dims = embeddings.detect_dims(dest)
+            (dest / "dims.txt").write_text(str(dims))
+            print(f"installed custom model '{name}' from {path} ({dims}d, auto-detected)")
+        except Exception as e:
+            print(f"installed custom model '{name}' from {path}, but dimension "
+                  f"auto-detect failed ({e}). Set embedding.dimensions in "
+                  "~/.trailmem/config.json before `use`.", file=sys.stderr)
         return 0
 
     spec = REGISTRY.get(name)
@@ -106,9 +114,18 @@ def use(name: str) -> int:
     old_dims = cfg["embedding"]["dimensions"]
     dims = REGISTRY.get(name, {}).get("dimensions")
     if dims is None:
-        print("custom model: enter its embedding dimensions in ~/.trailmem/config.json "
-              "(embedding.dimensions) before reindex.", file=sys.stderr)
-        dims = old_dims
+        # custom model — read dims auto-detected at install time
+        dims_file = MODELS_DIR / name / "dims.txt"
+        if dims_file.exists():
+            dims = int(dims_file.read_text().strip())
+        elif cfg["embedding"].get("dimensions") and name == cfg["embedding"].get("model"):
+            dims = old_dims
+        else:
+            print(f"error: dimensions for custom model '{name}' unknown "
+                  "(no dims.txt from install, none in config.json). Reinstall via "
+                  "`trailmem model install` or set embedding.dimensions manually.",
+                  file=sys.stderr)
+            return 1
     warn, block = BANDS.get(name, (0.85, 0.92))
     cfg["embedding"].update({"enabled": True, "model": name, "dimensions": dims,
                              "dedup_warn": warn, "dedup_block": block})
