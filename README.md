@@ -30,7 +30,7 @@ Prefer manual registration? Each host has its own mechanism:
 | Claude Code | `claude mcp add trailmem -- trailmem-mcp` |
 | Codex | add an `[mcp_servers.trailmem]` table to `~/.codex/config.toml` |
 | Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
-| Kilo | add `trailmem` under `mcpServers` in `~/.config/kilo/kilo.jsonc` |
+| Kilo | add `trailmem` under `mcp` in `~/.config/kilo/kilo.jsonc` as `{"type":"local","command":["trailmem-mcp"]}` (kilo 7.x format) |
 | OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
 | Antigravity | add `trailmem` under `mcpServers` in `~/.gemini/config/mcp_config.json` |
 | Zed | add `trailmem` under `context_servers` in `~/.config/zed/settings.json` |

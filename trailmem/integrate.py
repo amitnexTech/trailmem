@@ -122,7 +122,7 @@ JSON_HOSTS = [
               or (_HOME() / ".kilo" / "bin" / "kilo").exists()
               or (_HOME() / ".config" / "kilo" / "kilo.jsonc").exists()),
      lambda: _HOME() / ".config" / "kilo" / "kilo.jsonc",
-     "mcpServers", _STD),
+     "mcp", lambda cmd: {"type": "local", "command": [cmd]}),
     ("OpenCode",
      lambda: (shutil.which("opencode") is not None
               or (_HOME() / ".config" / "opencode").is_dir()
