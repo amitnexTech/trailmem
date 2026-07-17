@@ -10,11 +10,38 @@ Trailmem gives agents durable cross-session memory without provider lock-in: a l
 
 ## Quick start
 
-Same commands on Windows, macOS, and Linux (pure Python; wheels ship for all three). On some systems use `pip3` or `python -m pip` instead of `pip`.
+Same commands on Windows, macOS, and Linux.
+
+### Install (recommended: `uv` — no Python needed)
+
+`trailmem` is a command-line tool, so install it as one — this puts `trailmem` on your `PATH` in every terminal. The cleanest way is [`uv`](https://docs.astral.sh/uv/), a standalone binary that needs **no pre-installed Python** (it fetches one for you):
+
+```bash
+# 1. Install uv (standalone — does NOT require Python):
+curl -LsSf https://astral.sh/uv/install.sh | sh          # Linux / macOS
+# Windows (PowerShell):  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 2. Install trailmem (uv downloads a Python for it if you don't have one):
+uv tool install trailmem
+```
+
+Already have Python and prefer [`pipx`](https://pipx.pypa.io/)? `pipx install trailmem` then `pipx ensurepath` works the same way (pipx needs an existing Python).
+
+<details>
+<summary>Plain <code>pip</code> (only inside a virtualenv or CI)</summary>
 
 ```bash
 pip install trailmem
-trailmem setup          # creates ~/.trailmem/, inits DB, downloads the default embedding model
+```
+
+`pip install` drops the `trailmem` command into the current Python's `bin`/`Scripts` folder, which is often **not on your `PATH`** — a global `pip install --user` or a system Python will leave you with `zsh: command not found: trailmem` (and on Debian/Ubuntu, a PEP 668 "externally-managed" error). Use `uv`/`pipx` above unless you're deliberately working inside an activated virtualenv. If you already ran `pip install` and hit `command not found`, either activate the venv you installed into or run it as `python -m trailmem` — or just switch to `uv tool install trailmem`.
+
+</details>
+
+### Set up and register
+
+```bash
+trailmem setup          # creates ~/.trailmem/, inits DB, downloads the default embedding model (~130 MB, one time)
 trailmem doctor         # health check
 
 # Register the MCP server with your agent host(s):
@@ -69,7 +96,9 @@ Then restart the agent and check the wiring: the agent should see six `trailmem_
 ### Updating
 
 ```bash
-pip install --upgrade trailmem
+uv tool upgrade trailmem       # if installed with uv
+pipx upgrade trailmem          # if installed with pipx
+pip install --upgrade trailmem # if installed with pip (inside the venv)
 ```
 
 There is no in-app "update available" notice — trailmem sends no telemetry, by design. Watch the GitHub Releases page instead.

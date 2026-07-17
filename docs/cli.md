@@ -4,7 +4,7 @@
 
 `trailmem` is the command-line interface for managing agent memory. All operations available via MCP tools are also available via CLI.
 
-**Installation:** `pip install trailmem`
+**Installation:** `uv tool install trailmem` (recommended: on PATH, no pre-installed Python needed; pipx or a venv pip install also work)
 **Binary:** `trailmem`
 **Help:** `trailmem` (no args), `trailmem help`, or `trailmem --help` all print top-level help with usage examples and exit 0; `trailmem <command> --help` shows per-command flags.
 
@@ -128,7 +128,7 @@ trailmem integrate
 # README has the generic guide ("Any other MCP agent") with the common JSON shape + `which trailmem-mcp` for the absolute path.
 
 # Update to a newer release
-pip install --upgrade trailmem
+uv tool upgrade trailmem   # (or: pipx upgrade trailmem / pip install --upgrade trailmem inside a venv)
 # No in-app "update available" notice (no telemetry, by design). Track GitHub Releases.
 
 # Health check
