@@ -52,13 +52,27 @@ trailmem integrate      # detects installed agent hosts, asks before writing any
 
 ### Saving a session before you exit
 
-An agent that forgets to record memory (or a hard `/exit`) can drop a session's context — a host end-of-session hook can't help, because it runs after the agent is gone. Three things guard against that:
+An agent that forgets to record memory (or a hard `/exit`) can drop a session's context — a host end-of-session hook can't help, because it runs after the agent is gone and never sees the conversation. Only the live agent, mid-session, can capture. trailmem gives it a portable trigger plus reminders.
 
-- **`/tm-save`** (Claude Code) — tell the still-running agent to store this session's decisions, lessons, and open tasks. Run it before `/exit`.
-- **Statusline** — `trailmem statusline` prints `🧠 trailmem: N saved this session`, or `⚠ 0 saved · /tm-save before exit` when nothing has been captured yet. Wire it into your host's statusline for an always-visible count.
+**Trigger a save** — use whichever your client supports (they all end in the same instruction: extract this session's decisions/lessons/tasks and call `trailmem_store`):
+
+| How | Works in | Invoke |
+|-----|----------|--------|
+| **MCP prompt** `save_session` (zero-config, portable) | Any client that surfaces MCP prompts | Claude Code `/mcp__trailmem__save_session` · VS Code `/mcp.trailmem.save_session` · Cursor & Windsurf: slash/prompt list · Zed: text threads only |
+| **`/tm-save`** command (installed by `integrate`) | Claude Code | `/tm-save` |
+| **Plain text** (always works) | Every client — the `trailmem_store` tool is universal | Type *"save this session to trailmem"* |
+
+Clients with no prompt support (e.g. **Codex**, **aider**) use the plain-text path — nothing is lost, the tool is always available. If your agent supports **custom slash commands**, you can point one at the same instruction yourself; formats differ per host, so check that agent's command-file docs (and avoid the config landmines below).
+
+**Reminders** so you remember to trigger it:
+
+- **Statusline** — `trailmem statusline` prints `🧠 trailmem: N saved this session`, or `⚠ 0 saved · save before exit` when nothing's captured yet. Reads `session_id` from stdin JSON (Claude Code) or `CLAUDE_CODE_SESSION_ID`/`KIRO_SESSION_ID` env; read-only, always exits 0. Wire it into your host's statusline, or run it standalone.
+- **Welcome tip** — the briefing ends with a save reminder (shown by hosts that surface the session-start output, e.g. Codex, Kilo).
 - **Next-session flag** — if the previous session stored nothing, the next welcome opens with a loud reminder.
 
-Prefer manual registration? Each host has its own mechanism:
+> **Wiring an unlisted agent yourself?** MCP config formats are not uniform, and a wrong guess can break the agent's launch. Known landmines: **VS Code / Copilot** uses the key `servers` (not `mcpServers`); **Continue** and **Goose** use YAML (a JSON writer corrupts them); **aider** has no MCP support at all. Always follow the agent's own current docs. The one thing that works everywhere without any of this is the plain-text path above.
+
+Prefer manual MCP registration? Each host has its own mechanism:
 
 | Host | Manual registration |
 |------|--------------------|

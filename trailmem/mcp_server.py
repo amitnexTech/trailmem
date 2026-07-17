@@ -189,6 +189,34 @@ def trailmem_link(
     raise ValidationError("action must be 'add' or 'remove'")
 
 
+@mcp.prompt(title="Save this session to memory")
+def save_session() -> str:
+    """Capture this session's durable decisions, lessons, and open tasks into
+    trailmem before you exit. Portable across every MCP client that surfaces
+    prompts (Claude Code, Cursor, VS Code, Windsurf, ...)."""
+    return (
+        "Capture the durable memory from THIS session into trailmem now, while "
+        "the full conversation is still in context.\n\n"
+        "1. Review the conversation and identify what is worth persisting across "
+        "sessions:\n"
+        "   - decision — a rule, tool choice, structure, or enforced behavior we settled on\n"
+        "   - lesson — a bug, mistake, or non-obvious thing learned (include the why)\n"
+        "   - task — concrete follow-up work still open\n"
+        "   - constraint / user_preference — a durable rule or personal preference\n"
+        "   Skip ephemeral chatter, things already stored, and anything derivable "
+        "from code or git history.\n"
+        "2. For each item, call the trailmem_store tool with content in ENGLISH "
+        "(hard rule even if we spoke another language), the correct event_type, and "
+        "a link to a related existing memory (link_to + edge_type) so it is not an "
+        "orphan — query first if unsure what to link to.\n"
+        "3. If trailmem_store reports a near-duplicate, update the existing memory "
+        "with trailmem_edit instead of forcing a second copy.\n"
+        "4. If nothing this session is genuinely worth persisting, say so plainly — "
+        "do NOT invent filler memories.\n\n"
+        "After saving, give a one-line summary of what you stored (ids + titles)."
+    )
+
+
 def main() -> None:
     mcp.run()
 

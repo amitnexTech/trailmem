@@ -61,12 +61,29 @@ Other hosts (Kiro/Codex/OpenCode) register the same two commands in their own ho
 
 ## Save-awareness (the `/exit` gap)
 
-A host end-of-session hook runs *after* the agent is gone and never sees the conversation, so it cannot capture memory. The only reliable capture point is the live agent, mid-session. Four complementary, LLM-free surfaces close the gap:
+A host end-of-session hook runs *after* the agent is gone and never sees the conversation, so it cannot capture memory. The only reliable capture point is the live agent, mid-session. Several complementary, LLM-free surfaces close the gap.
 
-1. **`/tm-save` command** — a Claude Code slash command (installed by `trailmem integrate` into `~/.claude/commands/tm-save.md`) that instructs the still-alive agent to extract this session's decisions/lessons/tasks and store them via `trailmem_store` (English, typed, linked, no filler). Run it before `/exit`.
-2. **Welcome tip** — the full welcome briefing ends with a one-line reminder to run `/tm-save` before exit. Universal across hosts.
-3. **`trailmem statusline`** — a CLI that reads `session_id` from stdin JSON (Claude Code) or env, counts `memories WHERE session_id = ?`, and prints a one-line status: `🧠 trailmem: N saved this session`, or an amber `⚠ trailmem: 0 saved · /tm-save before exit` when nothing has been stored yet. Read-only, always exits 0. Wire it into a host statusline; for hosts without one, run it standalone.
-4. **Next-session flag** — if a prior session (same agent) registered but stored **zero** memories, the next welcome opens with a loud `🛑 LAST SESSION SAVED 0 MEMORIES` line. This is the backup for a forgotten `/tm-save`.
+### The save trigger — how a user asks the agent to save
+
+The capture instruction reaches the agent through whichever of these its client supports, in order of portability:
+
+1. **MCP prompt `save_session` (portable, zero-config).** trailmem's MCP server exposes a `save_session` prompt. Every MCP client that surfaces prompts shows it to the user automatically — no per-agent files, no config edits, no crash risk (prompts are read-only protocol negotiation, they never touch a config file). Invocation differs per client:
+   - **Claude Code** — `/mcp__trailmem__save_session`
+   - **VS Code (Copilot agent mode)** — `/mcp.trailmem.save_session`
+   - **Cursor** — surfaced in the slash-command list
+   - **Windsurf (Cascade)** — surfaced as a prompt
+   - **Zed** — text threads only (not agent threads)
+2. **`/tm-save` slash command (Claude Code convenience).** `trailmem integrate` also drops a native command file at `~/.claude/commands/tm-save.md`. Redundant with the MCP prompt on Claude Code, kept as a familiar one-token entry point.
+3. **Plain text (works everywhere, including clients with no prompt support — e.g. Codex, aider).** The `trailmem_store` tool is a universal MCP primitive, so the user can always just type *“save this session to trailmem”* and the agent calls the tool. A slash command is only sugar over this — nothing is unavailable without it.
+4. **DIY per-agent wiring.** A user whose agent supports custom slash commands can point one at the same instruction. Formats differ per agent — see the README “Saving a session” section for the correct file location/format per host (and the config-format landmines to avoid).
+
+The `save_session` prompt body and the `tm-save.md` file carry the *same* instruction: extract this session's decisions/lessons/tasks and call `trailmem_store` (English, correct `event_type`, linked, dedup-aware, no filler).
+
+### The reminders — so the user remembers to trigger a save
+
+- **Welcome tip** — the full welcome briefing ends with a one-line reminder to save before exit. Universal across hosts.
+- **`trailmem statusline`** — a CLI that reads `session_id` from stdin JSON (Claude Code) or env, counts `memories WHERE session_id = ?`, and prints a one-line status: `🧠 trailmem: N saved this session`, or an amber `⚠ trailmem: 0 saved · save before exit` when nothing has been stored yet. Read-only, always exits 0. Wire it into a host statusline; for hosts without one, run it standalone.
+- **Next-session flag** — if a prior session (same agent) registered but stored **zero** memories, the next welcome opens with a loud `🛑 LAST SESSION SAVED 0 MEMORIES` line. The backup for a forgotten save.
 
 None of these auto-generate memory content (that stays the agent's job — the anti-bloat rule holds); they only surface the gap and give the user/agent a one-command way to act on it.
 

@@ -425,7 +425,7 @@ def cmd_statusline(a) -> int:
         if n > 0:
             print(f"🧠 trailmem: {n} saved this session")
         else:
-            print("⚠ trailmem: 0 saved this session · /tm-save before exit")
+            print("⚠ trailmem: 0 saved this session · save before exit")
     except Exception:
         pass  # statusline must never emit an error or block the host
     return 0
