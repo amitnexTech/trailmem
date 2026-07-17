@@ -79,12 +79,13 @@ The inspector is the reading surface, not a cramped card list. Use comfortable l
 - Every relationship in the inspector is a clickable chip showing direction, type, `#id`, title, and optional reason. Clicking one selects and reveals that linked memory immediately.
 - Selecting a memory highlights its direct neighborhood without dimming the entire graph so heavily that labels become unreadable.
 - Search supports title/content/ID/node ID; filters include type, status, agent, project/global scope, pinned, and orphan state.
+- **Scope switcher:** the dashboard opens in `all` scope by default (global + every project) and offers a top-bar switcher to narrow to `global` only or a single project at runtime without restarting. `trailmem dashboard --project <all|global|path>` sets the initial scope. Timestamps in the inspector/list render in the system local timezone (storage stays UTC; see [[schema]]).
 - Health counters are actionable: clicking orphans, stale tasks, or contradictions applies the matching filter and explains the remediation path.
 - List/search results always show `#id`, `node_id` (or copy affordance), type, status, agent, edge count, and a restrained preview.
 
 ### Graph behavior
 
-- Node color encodes type; shape, border, or badge distinguishes pinned/constraint, project/global scope, and archived/superseded status. Do not rely on color alone.
+- Node color encodes type; shape, border, or badge distinguishes pinned/constraint, project/global scope, and archived/superseded status. Do not rely on color alone. In `all` scope, a per-project accent color additionally distinguishes which project each node belongs to.
 - Edge styling differentiates relationship type and direction. Hover/focus reveals its reason/metadata.
 - New nodes appear without restarting the force simulation or moving existing nodes. Changed nodes preserve coordinates.
 - Provide an explicit **Re-layout graph** action with a confirmation/explanation. Automatic re-layout is prohibited.

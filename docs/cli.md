@@ -110,7 +110,7 @@ trailmem import <file.json> --replace  # full overwrite (DOUBLE confirmation!)
 # Web Dashboard
 trailmem dashboard
 # Starts web UI at http://127.0.0.1:3800 (loopback-only, Ctrl-C to stop)
-# Flags: --port N | --project <path|global> | --agent <default attribution for UI-created memories>
+# Flags: --port N | --project <all|global|path> (default 'all' = global + every project; runtime scope switcher + per-project node colors in the UI) | --agent <default attribution for UI-created memories>
 
 # Setup (first-time) — identical on Windows / macOS / Linux (pure-Python package)
 trailmem setup
@@ -217,7 +217,7 @@ trailmem export --format json
 | `KIRO_SESSION_ID` | Session tracking | Kiro sets this |
 | `TRAILMEM_DB` | Custom DB path | Default: ~/.trailmem/trailmem.db |
 | `TRAILMEM_HOME` | Custom home dir (config, models, DB, hooks.log) | Default: ~/.trailmem |
-| `TRAILMEM_PROJECT` | Override project detection (value global stores NULL for cross-project scope) | Default: cwd |
+| `TRAILMEM_PROJECT` | Override project detection. Value must be an absolute path or the literal `global` (stores NULL for cross-project scope); a bare name is rejected. | Default: cwd |
 
 ---
 

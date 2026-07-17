@@ -8,7 +8,7 @@ registered/updated, and the current session is always excluded — otherwise
 import sqlite3
 
 from .queries import edge_count
-from .store import now
+from .store import fmt_local, now
 
 SIGNIFICANT = ("decision", "lesson", "error_pattern", "task", "session_summary", "constraint")
 
@@ -165,7 +165,7 @@ def _full(conn, m) -> str:
 
 def _title_line(conn, m) -> str:
     return (f"#{m['id']} [{m['node_id']}] [↔{edge_count(conn, m['node_id'])}] "
-            f"{m['title']} [{m['agent_type']}, {m['created_at'][:10]}]")
+            f"{m['title']} [{m['agent_type']}, {fmt_local(m['created_at'], date_only=True)}]")
 
 
 def _action_needed(conn, project) -> list[str]:

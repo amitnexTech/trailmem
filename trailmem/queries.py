@@ -8,7 +8,7 @@ import re
 import sqlite3
 
 from . import embeddings
-from .store import now
+from .store import fmt_local, now
 
 
 def resolve_ref(conn: sqlite3.Connection, ref) -> sqlite3.Row | None:
@@ -168,7 +168,7 @@ def format_show(data: dict) -> str:
     out = [
         f"#{m['id']} [{m['node_id']}] {m['title']}",
         f"  Type: {m['event_type']} | Agent: {m['agent_type']} | Status: {m['status']}",
-        f"  Created: {m['created_at'][:10]}" + (f" | Updated: {m['updated_at'][:10]}" if m["updated_at"] else ""),
+        f"  Created: {fmt_local(m['created_at'])}" + (f" | Updated: {fmt_local(m['updated_at'])}" if m["updated_at"] else ""),
         f"  Access count: {m['access_count']} | Pinned: {'yes' if m['pinned'] else 'no'}",
     ]
     if m["archive_reason"]:

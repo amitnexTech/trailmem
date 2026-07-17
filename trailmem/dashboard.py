@@ -30,6 +30,8 @@ class DashboardApp:
     """Application/service boundary for the dashboard HTTP transport."""
 
     def __init__(self, project: str | None, default_agent: str):
+        # project can be: None (global only), "all" (global + every project),
+        # or an explicit project path. Mutated at runtime by set_scope().
         self.project = project
         self.default_agent = default_agent
 
@@ -38,13 +40,31 @@ class DashboardApp:
         init_db(conn)
         return conn
 
+    def set_scope(self, scope: str | None) -> None:
+        """Switch scope at runtime without restarting the server."""
+        if scope in ("", "global"):
+            self.project = None
+        else:
+            self.project = scope  # "all" or a project path
+
     def _scope_clause(self, alias: str = "m") -> tuple[str, list[Any]]:
         if self.project is None:
             return f"{alias}.project IS NULL", []
+        if self.project == "all":
+            return "1=1", []  # global + every project
         return f"({alias}.project = ? OR {alias}.project IS NULL)", [self.project]
 
     def _in_scope(self, memory: dict[str, Any]) -> bool:
+        if self.project == "all":
+            return True
         return memory["project"] is None or memory["project"] == self.project
+
+    def scope_label(self) -> str:
+        if self.project is None:
+            return "global"
+        if self.project == "all":
+            return "all projects"
+        return self.project
 
     @staticmethod
     def _preview(content: str, limit: int = 180) -> str:
@@ -153,7 +173,7 @@ class DashboardApp:
             return {
                 "revision": self.revision(conn),
                 "project": self.project,
-                "scope_label": "global" if self.project is None else self.project,
+                "scope_label": self.scope_label(),
                 "default_agent": self.default_agent,
                 "nodes": nodes,
                 "edges": edges,
@@ -219,6 +239,32 @@ class DashboardApp:
     def revision(conn) -> int:
         row = conn.execute("SELECT revision FROM dashboard_state WHERE id = 1").fetchone()
         return int(row[0]) if row else 0
+
+    def scope_list(self) -> dict[str, Any]:
+        """All scopes available in the DB, with per-scope active counts."""
+        conn = self.connection()
+        try:
+            rows = conn.execute(
+                "SELECT project, COUNT(*) c FROM memories "
+                "WHERE status = 'active' GROUP BY project"
+            ).fetchall()
+            counts: dict[str, int] = {}
+            for r in rows:
+                key = "global" if r["project"] is None else r["project"]
+                counts[key] = counts.get(key, 0) + r["c"]
+            total = sum(counts.values())
+            scopes = [{"key": "all", "label": "All projects", "count": total}]
+            if counts.get("global"):
+                scopes.append({"key": "global", "label": "Global", "count": counts["global"]})
+            for key, count in sorted(counts.items()):
+                if key in ("global",):
+                    continue
+                scopes.append({"key": key, "label": key.split("/")[-1], "count": count})
+            current = "all" if self.project == "all" else (
+                "global" if self.project is None else self.project)
+            return {"scopes": scopes, "current": current}
+        finally:
+            conn.close()
 
     def create_memory(self, data: dict[str, Any]) -> dict[str, Any]:
         conn = self.connection()
@@ -431,6 +477,8 @@ def _handler_class(app: DashboardApp):
                     self._html()
                 elif path == "/api/snapshot":
                     self._json(app.snapshot())
+                elif path == "/api/scope-list":
+                    self._json(app.scope_list())
                 elif path == "/api/stats":
                     self._json(app.stats())
                 elif path == "/api/search":
@@ -464,7 +512,11 @@ def _handler_class(app: DashboardApp):
             _, parts, _ = self._parts()
             try:
                 data = self._payload()
-                if parts == ["api", "memories"]:
+                if parts == ["api", "scope"]:
+                    scope = data.get("scope")
+                    app.set_scope(None if scope in ("global", "", None) else scope)
+                    self._json(app.snapshot())
+                elif parts == ["api", "memories"]:
                     result = app.create_memory(data)
                     if result["outcome"] != "stored":
                         self._json(result, HTTPStatus.CONFLICT)
@@ -583,8 +635,12 @@ def _handler_class(app: DashboardApp):
     return DashboardHandler
 
 
-def serve(*, port: int = 3800, project: str | None = None, default_agent: str = "user") -> int:
-    """Run the loopback-only dashboard until the user presses Ctrl-C."""
+def serve(*, port: int = 3800, project: str | None = "all", default_agent: str = "user") -> int:
+    """Run the loopback-only dashboard until the user presses Ctrl-C.
+
+    Default scope is "all" (global + every project). Use --project to start
+    in a narrower scope; the in-UI switcher can change it at runtime anyway.
+    """
     app = DashboardApp(project, default_agent)
     # Initializing before binding gives a clear error before the user sees a URL.
     conn = app.connection()
@@ -596,7 +652,7 @@ def serve(*, port: int = 3800, project: str | None = None, default_agent: str = 
               "Is another dashboard running? Try --port.", file=sys.stderr)
         return 1
     print(f"Trailmem dashboard: http://127.0.0.1:{port}")
-    print("Scope: " + (project or "global") + "  •  Ctrl-C to stop")
+    print("Scope: " + app.scope_label() + "  •  Ctrl-C to stop")
     try:
         server.serve_forever(poll_interval=0.25)
     except KeyboardInterrupt:
@@ -619,7 +675,7 @@ DASHBOARD_HTML = r'''<!doctype html>
 </style>
 </head>
 <body>
-<header class="topbar"><div class="brand">Trailmem</div><div id="scope" class="scope"></div><input id="search" class="search" type="search" placeholder="Search title, content, #id, or node ID" aria-label="Search memories"><span id="status" class="status">Connecting…</span><div class="counters" aria-label="Health counters"><button class="counter" data-health="orphans">0 orphans</button><button class="counter" data-health="stale">0 stale tasks</button><button class="counter" data-health="contradictions">0 contradictions</button></div><button id="create" class="primary">New memory</button></header>
+<header class="topbar"><div class="brand">Trailmem</div><div id="scope" class="scope"></div><label class="scope-switch"><span class="scope-switch-label">Scope</span><select id="scope-switch" aria-label="Switch memory scope"></select></label><input id="search" class="search" type="search" placeholder="Search title, content, #id, or node ID" aria-label="Search memories"><span id="status" class="status">Connecting…</span><div class="counters" aria-label="Health counters"><button class="counter" data-health="orphans">0 orphans</button><button class="counter" data-health="stale">0 stale tasks</button><button class="counter" data-health="contradictions">0 contradictions</button></div><button id="create" class="primary">New memory</button></header>
 <main class="workspace"><section class="explorer"><section class="panel graph-wrap"><div class="panel-head"><div class="graph-title"><h2>Memory graph</h2><span id="graph-summary" class="graph-subtitle">0 memories · 0 links</span></div><div class="graph-actions"><button id="zoom-out" class="icon" type="button" title="Zoom out" aria-label="Zoom out">−</button><button id="zoom-in" class="icon" type="button" title="Zoom in" aria-label="Zoom in">+</button><button id="fit-graph" type="button" title="Fit all memories in view">Fit</button><button id="relayout" type="button" title="Release pinned nodes and re-layout graph">Re-layout</button><details id="graph-settings" class="graph-settings"><summary title="Graph display settings" aria-label="Graph display settings">Settings</summary><div class="graph-settings-panel"><label class="graph-setting">Labels<select id="label-mode"><option value="auto">Auto</option><option value="always">Always</option><option value="hover">On hover</option><option value="off">Off</option></select></label><label class="graph-setting"><span>Direction arrows</span><input id="show-arrows" type="checkbox" checked></label><label class="graph-setting"><span>Dim unrelated</span><input id="dim-neighbors" type="checkbox" checked></label><label class="graph-setting graph-setting-range"><span>Node size</span><input id="node-scale" type="range" min="75" max="150" value="100"><output id="node-scale-value">100%</output></label><label class="graph-setting graph-setting-range"><span>Link length</span><input id="link-distance" type="range" min="70" max="180" value="112"><output id="link-distance-value">112</output></label><label class="graph-setting graph-setting-range"><span>Repel force</span><input id="repel-force" type="range" min="20" max="120" value="72"><output id="repel-force-value">72</output></label><p class="graph-setting-note">Drag a node to pin it. Force settings apply on Re-layout.</p></div></details></div></div><div id="graph-stage" class="graph-stage" data-label-mode="auto"><svg id="graph" viewBox="-500 -350 1000 700" role="group" aria-label="Interactive memory relationship graph"><defs><marker id="arrow-related" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8c94ad"></path></marker><marker id="arrow-contradicts" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ff6b7d"></path></marker><marker id="arrow-supersedes" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9b8cff"></path></marker><marker id="arrow-derived_from" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#71b7ff"></path></marker><marker id="arrow-evolves" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#62d6b1"></path></marker></defs><g id="viewport"><g id="edge-layer"></g><g id="node-layer"></g></g></svg><div class="graph-hud"><span id="graph-zoom" class="graph-pill">100%</span><span id="graph-selection" class="graph-pill">Drag canvas to pan · scroll to zoom</span></div><div class="graph-legend" aria-hidden="true"><span><i></i> memory</span><span>— relationship</span><span>drag node to pin</span></div><div id="edge-tip" class="graph-tip" hidden role="status"></div><div id="graph-empty" class="graph-empty" hidden>No memories match the current filters.</div></div></section><section class="panel"><div class="panel-head"><h2>Memories <span id="result-count" class="small"></span></h2><div class="list-controls"><select id="type-filter" aria-label="Filter memories by type"><option value="">All types</option><option>decision</option><option>lesson</option><option>error_pattern</option><option>task</option><option>memory</option><option>user_preference</option><option>constraint</option><option>session_summary</option></select><select id="status-filter" aria-label="Filter memories by status"><option value="">All statuses</option><option value="active">Active</option><option value="archived">Archived</option><option value="superseded">Superseded</option><option value="orphans">Orphans</option></select><select id="agent-filter" aria-label="Filter memories by agent"><option value="">All agents</option><option>user</option><option>kiro</option><option>claude</option><option>codex</option><option>opencode</option><option>kilo</option><option>antigravity</option></select><select id="scope-filter" aria-label="Filter memories by scope"><option value="">Project + global</option><option value="project">Project</option><option value="global">Global</option></select><select id="pinned-filter" aria-label="Filter pinned memories"><option value="">Pinned + unpinned</option><option value="yes">Pinned only</option></select></div></div><div id="filter-note" class="filter-note" hidden></div><div id="memory-list" class="memory-list" aria-label="Memory list"></div></section></section><aside class="inspector"><div id="inspector" class="inspector-inner"><div class="empty">Select a memory in the graph or list to read it in full.</div></div></aside></main>
 <dialog id="memory-dialog"><form id="memory-form" method="dialog"><h2>New memory</h2><p class="small">New records must link to an existing memory after the first bootstrap record.</p><label>Title <input name="title" required minlength="3" maxlength="60"></label><div class="form-row"><label>Type <select name="type"><option>memory</option><option>decision</option><option>lesson</option><option>error_pattern</option><option>task</option><option>user_preference</option><option>constraint</option><option>session_summary</option></select></label><label>Agent <select name="agent"><option>user</option><option>kiro</option><option>claude</option><option>codex</option><option>opencode</option><option>kilo</option><option>antigravity</option></select></label></div><label>Content <textarea name="content" required minlength="50" placeholder="Capture durable context, rationale, or a verified outcome."></textarea></label><div class="form-row"><label>Link to (ID or node ID) <input name="link_to" placeholder="#12 or mem-a1b2c3d4"></label><label>Relationship <select name="edge_type"><option>related</option><option>derived_from</option><option>supersedes</option><option>contradicts</option><option>evolves</option></select></label></div><div class="form-error" aria-live="polite"></div><div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary" type="submit">Store memory</button></div></form></dialog>
 <dialog id="edit-dialog"><form id="edit-form" method="dialog"><h2>Edit memory</h2><label>Title <input name="title" required minlength="3" maxlength="60"></label><label>Content <textarea name="content" required minlength="50"></textarea></label><div class="form-error" aria-live="polite"></div><div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary" type="submit">Save changes</button></div></form></dialog>
@@ -647,6 +703,9 @@ DASHBOARD_HTML = r'''<!doctype html>
   function visibleNodes(){const search=$('#search').value.trim().toLowerCase(), type=$('#type-filter').value, status=$('#status-filter').value, agent=$('#agent-filter').value, scope=$('#scope-filter').value, pinned=$('#pinned-filter').value;return state.nodes.filter(n=>{const hay=`${n.id} ${n.node_id} ${n.title} ${n.preview}`.toLowerCase(); if(search&&state.searchNodeIds&&!state.searchNodeIds.has(n.node_id))return false;if(search&&!state.searchNodeIds&&!hay.includes(search))return false;if(type&&n.type!==type)return false;if(status==='orphans'&&n.edge_count!==0)return false;if(status&&status!=='orphans'&&n.status!==status)return false;if(agent&&n.agent!==agent)return false;if(scope&&n.scope!==scope)return false;if(pinned==='yes'&&!n.pinned)return false;return true})}
   function visibleNodeIds(){return new Set(visibleNodes().map(n=>n.node_id))}
   function adjacency(){const map=new Map(state.nodes.map(n=>[n.node_id,new Set()]));for(const edge of state.edges){map.get(edge.source)?.add(edge.target);map.get(edge.target)?.add(edge.source)}return map}
+  // Full end-to-end connected set via BFS — every memory reachable from `id`
+  // through any chain of relationships, not just direct neighbors.
+  function connectedSet(id){const adj=adjacency(),seen=new Set(),queue=[id];while(queue.length){const cur=queue.shift();if(seen.has(cur))continue;seen.add(cur);for(const next of adj.get(cur)||[])if(!seen.has(next))queue.push(next)}return seen}
   function edgeCoordinates(edge){const a=state.positions.get(edge.source),b=state.positions.get(edge.target);if(!a||!b)return null;const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,sourcePad=nodeRadius(nodeById(edge.source))+2,targetPad=nodeRadius(nodeById(edge.target))+(state.settings.showArrows?10:3);return{x1:a.x+dx/d*sourcePad,y1:a.y+dy/d*sourcePad,x2:b.x-dx/d*targetPad,y2:b.y-dy/d*targetPad}}
   function markerFor(type){return`url(#arrow-${['contradicts','supersedes','derived_from','evolves'].includes(type)?type:'related'})`}
   function hideEdgeTip(){$('#edge-tip').hidden=true}
@@ -654,11 +713,11 @@ DASHBOARD_HTML = r'''<!doctype html>
   function moveEdgeTip(event){const tip=$('#edge-tip'),r=graphStage.getBoundingClientRect();tip.style.left=`${Math.max(4,Math.min(r.width-310,event.clientX-r.left))}px`;tip.style.top=`${Math.max(4,Math.min(r.height-70,event.clientY-r.top))}px`}
   function makeEdgeElement(edge,visible=visibleNodeIds()){if(!visible.has(edge.source)||!visible.has(edge.target))return null;const coordinates=edgeCoordinates(edge);if(!coordinates)return null;const group=svg('g',{class:`edge ${edge.type}`,'data-edge-id':edge.id,'data-source':edge.source,'data-target':edge.target,role:'img','aria-label':`${edge.type.replaceAll('_',' ')} relationship`}),line=svg('line',{...coordinates,class:'edge-line'}),hit=svg('line',{...coordinates,class:'edge-hit'});if(state.settings.showArrows)line.setAttribute('marker-end',markerFor(edge.type));group.append(line,hit);group.addEventListener('pointerenter',e=>{group.classList.add('is-focus');showEdgeTip(edge,e)});group.addEventListener('pointermove',moveEdgeTip);group.addEventListener('pointerleave',()=>{hideEdgeTip();applyGraphFocus()});return group}
   function beginNodeDrag(event,id){if(event.button!==0)return;event.preventDefault();event.stopPropagation();event.currentTarget.focus({preventScroll:true});const p=clientToGraph(event.clientX,event.clientY),wasFixed=state.fixed.has(id);state.nodeDrag={id,pointerId:event.pointerId,startX:p.x,startY:p.y,moved:false,wasFixed};graph.setPointerCapture(event.pointerId);state.fixed.add(id);focusGraphNode(id,true)}
-  function makeNodeElement(node){const p=state.positions.get(node.node_id),radius=nodeRadius(node),g=svg('g',{class:`node ${node.status!=='active'?'archived':''} ${state.selected===node.node_id?'selected':''}`,transform:`translate(${p.x} ${p.y})`,tabindex:'0',role:'button','data-node-id':node.node_id,'aria-label':`Memory ${node.id}: ${node.title}`}),halo=svg('circle',{class:'node-halo',r:radius+6}),core=svg('circle',{class:'node-core',r:radius,fill:typeColors[node.type]||'#8b93a7'});g.append(halo,core);if(node.pinned||state.fixed.has(node.node_id)){const pin=svg('text',{class:'pin-mark',x:'-4',y:'4','aria-hidden':'true'});pin.textContent='•';g.append(pin)}const text=svg('text',{class:'node-label',x:radius+9,y:'4'});text.textContent=(node.title.length>32?node.title.slice(0,31)+'…':node.title);g.append(text);g.addEventListener('pointerenter',()=>focusGraphNode(node.node_id,true));g.addEventListener('pointerleave',()=>{state.hovered=null;applyGraphFocus()});g.addEventListener('focus',()=>focusGraphNode(node.node_id,true));g.addEventListener('blur',()=>{state.hovered=null;applyGraphFocus()});g.addEventListener('pointerdown',e=>beginNodeDrag(e,node.node_id));g.addEventListener('click',()=>{if(state.suppressClick){state.suppressClick=false;return}select(node.node_id)});g.addEventListener('dblclick',e=>{e.preventDefault();select(node.node_id);focusNode(node.node_id)});g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(node.node_id)}else if(e.key==='f'){e.preventDefault();focusNode(node.node_id)}});return g}
+  function makeNodeElement(node){const p=state.positions.get(node.node_id),radius=nodeRadius(node),g=svg('g',{class:`node ${node.status!=='active'?'archived':''} ${state.selected===node.node_id?'selected':''}`,transform:`translate(${p.x} ${p.y})`,tabindex:'0',role:'button','data-node-id':node.node_id,'aria-label':`Memory ${node.id}: ${node.title}`}),halo=svg('circle',{class:'node-halo',r:radius+6}),core=svg('circle',{class:'node-core',r:radius,fill:'#9aa3b8'});g.style.setProperty('--proj-color',node.project?colorForProject(node.project):'#9b8cff');g.append(halo,core);if(node.pinned||state.fixed.has(node.node_id)){const pin=svg('text',{class:'pin-mark',x:'-4',y:'4','aria-hidden':'true'});pin.textContent='•';g.append(pin)}const text=svg('text',{class:'node-label',x:radius+9,y:'4'});text.textContent=(node.title.length>32?node.title.slice(0,31)+'…':node.title);g.append(text);g.addEventListener('pointerenter',()=>focusGraphNode(node.node_id,true));g.addEventListener('pointerleave',()=>{state.hovered=null;applyGraphFocus()});g.addEventListener('focus',()=>focusGraphNode(node.node_id,true));g.addEventListener('blur',()=>{state.hovered=null;applyGraphFocus()});g.addEventListener('pointerdown',e=>beginNodeDrag(e,node.node_id));g.addEventListener('click',()=>{if(state.suppressClick){state.suppressClick=false;return}select(node.node_id)});g.addEventListener('dblclick',e=>{e.preventDefault();select(node.node_id);focusNode(node.node_id)});g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(node.node_id)}else if(e.key==='f'){e.preventDefault();focusNode(node.node_id)}});return g}
   function graphNodeElement(id){return Array.from(nodeLayer.children).find(el=>el.dataset.nodeId===id)}
   function graphEdgeElement(id){return Array.from(edgeLayer.children).find(el=>Number(el.dataset.edgeId)===Number(id))}
   function syncGraphPositions(ids=null){const changed=ids?new Set(ids):null;for(const el of nodeLayer.children){if(changed&&!changed.has(el.dataset.nodeId))continue;const p=state.positions.get(el.dataset.nodeId);if(p)el.setAttribute('transform',`translate(${p.x} ${p.y})`)}for(const el of edgeLayer.children){if(changed&&!changed.has(el.dataset.source)&&!changed.has(el.dataset.target))continue;const edge=state.edges.find(item=>Number(item.id)===Number(el.dataset.edgeId)),c=edge&&edgeCoordinates(edge);if(!c)continue;for(const line of el.querySelectorAll('line'))for(const [key,value] of Object.entries(c))line.setAttribute(key,value)}}
-  function applyGraphFocus(){const focus=state.hovered||state.selected,neighbors=focus?(adjacency().get(focus)||new Set()):new Set();for(const el of nodeLayer.children){const id=el.dataset.nodeId;el.classList.toggle('selected',id===state.selected);el.classList.toggle('hovered',id===state.hovered);el.classList.toggle('neighbor',Boolean(focus&&neighbors.has(id)));el.classList.toggle('dim',Boolean(state.settings.dimNeighbors&&focus&&id!==focus&&!neighbors.has(id)))}for(const el of edgeLayer.children){const connected=Boolean(focus&&(el.dataset.source===focus||el.dataset.target===focus));el.classList.toggle('is-focus',connected);el.classList.toggle('is-dim',Boolean(state.settings.dimNeighbors&&focus&&!connected))}const node=focus&&nodeById(focus);$('#graph-selection').textContent=node?`#${node.id} ${node.title}`:'Drag canvas to pan · scroll to zoom'}
+  function applyGraphFocus(){const focus=state.hovered||state.selected,cluster=focus?connectedSet(focus):new Set();for(const el of nodeLayer.children){const id=el.dataset.nodeId;el.classList.toggle('selected',id===state.selected);el.classList.toggle('hovered',id===state.hovered);el.classList.toggle('neighbor',Boolean(focus&&cluster.has(id)));el.classList.toggle('cluster',Boolean(focus&&cluster.has(id)&&id!==focus));el.classList.toggle('dim',Boolean(state.settings.dimNeighbors&&focus&&id!==focus&&!cluster.has(id)))}for(const el of edgeLayer.children){const connected=Boolean(focus&&cluster.has(el.dataset.source)&&cluster.has(el.dataset.target));el.classList.toggle('is-focus',connected);el.classList.toggle('is-dim',Boolean(state.settings.dimNeighbors&&focus&&!connected))}const node=focus&&nodeById(focus);$('#graph-selection').textContent=node?`#${node.id} ${node.title}${cluster.size>1?` · ${cluster.size} connected`:''}`:'Drag canvas to pan · scroll to zoom'}
   function focusGraphNode(id,hovered=false){if(hovered)state.hovered=id;applyGraphFocus()}
   function updateGraphMeta(){const visible=visibleNodeIds(),links=state.edges.filter(e=>visible.has(e.source)&&visible.has(e.target)).length;$('#graph-summary').textContent=`${visible.size} ${visible.size===1?'memory':'memories'} · ${links} ${links===1?'link':'links'}`;$('#graph-empty').hidden=visible.size!==0}
   function patchEdgesForNode(id){const visible=visibleNodeIds();Array.from(edgeLayer.children).filter(el=>el.dataset.source===id||el.dataset.target===id).forEach(el=>el.remove());for(const edge of state.edges){if(edge.source!==id&&edge.target!==id)continue;const element=makeEdgeElement(edge,visible);if(element)edgeLayer.append(element)}syncGraphPositions([id])}
@@ -753,6 +812,11 @@ DASHBOARD_HTML = r'''<!doctype html>
     .graph-wrap.graph-expanded .graph-stage{height:calc(100vh - 56px)}
     body.graph-mode{overflow:hidden}
     @media(max-width:720px){#fit-graph,#relayout{display:none}.graph-actions>#expand-graph,.graph-settings>summary{padding-inline:6px;font-size:11px}.graph-stage.controls-open .graph-hud,.graph-stage.controls-open .graph-legend{left:12px;opacity:.18}.graph-control-dock{bottom:12px}.graph-legend{max-height:34px;overflow:hidden}}
+    .scope-switch{display:flex;align-items:center;gap:6px;margin-left:2px}
+    .scope-switch-label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+    .scope-switch select{border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);padding:.4rem .5rem;font-size:12px;max-width:200px}
+    .node.cluster .node-core{stroke:var(--proj-color,#9b8cff);stroke-width:3;stroke-opacity:1}
+    .graph-legend .graph-scope-dot{box-shadow:0 0 0 2px color-mix(in srgb,var(--dot-color) 26%,transparent);background:var(--dot-color)}
   `;
   document.head.append(graphEnhancementStyle);
 
@@ -815,6 +879,16 @@ DASHBOARD_HTML = r'''<!doctype html>
   function fitVisibleGraph(){const ids=applyLocalGraph(),points=[...ids].map(id=>state.positions.get(id)).filter(Boolean);if(!points.length)return;const minX=Math.min(...points.map(point=>point.x)),maxX=Math.max(...points.map(point=>point.x)),minY=Math.min(...points.map(point=>point.y)),maxY=Math.max(...points.map(point=>point.y)),rect=graph.getBoundingClientRect(),ratio=Math.max(rect.width,1)/Math.max(rect.height,1),padding=82;let width=Math.max(300,maxX-minX+padding*2),height=Math.max(210,maxY-minY+padding*2);if(width/height<ratio)width=height*ratio;else height=width/ratio;state.view={x:(minX+maxX-width)/2,y:(minY+maxY-height)/2,w:width,h:height};updateView()}
   fitGraph=fitVisibleGraph;
 
+  // ---- Scope switcher: switch project/global scope at runtime, no reload ----
+  const projectColors={__global:'#8b93a7'};
+  const projectPalette=['#6c8cff','#49b98a','#ef6173','#e5a84b','#b47bea','#38bdb5','#df70aa','#7dd3fc','#f59e0b','#34d399'];
+  let projectIndex=0;
+  function colorForProject(project){const key=project||'__global';if(!projectColors[key])projectColors[key]=projectPalette[projectIndex++%projectPalette.length];return projectColors[key]}
+  function applyProjectColors(){for(const element of nodeLayer.children){const node=nodeById(element.dataset.nodeId);if(!node)continue;element.style.setProperty('--proj-color',colorForProject(node.project))}}
+  const scopeSwitch=$('#scope-switch');
+  async function loadScopeList(){try{const data=await api('/api/scope-list');scopeSwitch.replaceChildren();for(const scope of data.scopes){const option=document.createElement('option');option.value=scope.key;option.textContent=`${scope.label} (${scope.count})`;scopeSwitch.append(option)}scopeSwitch.value=data.current;const colorMap={};for(const scope of data.scopes)if(scope.key!=='all'&&scope.key!=='global')colorForProject(scope.key);applyProjectColors()}catch(e){}}
+  scopeSwitch.addEventListener('change',async()=>{try{await api('/api/scope',{method:'POST',body:JSON.stringify({scope:scopeSwitch.value})});await loadSnapshot(false);applyProjectColors();notice(`Scope: ${scopeSwitch.options[scopeSwitch.selectedIndex].textContent}`)}catch(e){notice(e.message)}});
+  const decorateProjectBase=decorateGraph;decorateGraph=function(){applyProjectColors();return decorateProjectBase()};
   const graphLegend=document.querySelector('.graph-legend'),typeNames={decision:'decision',lesson:'lesson',error_pattern:'error pattern',task:'task',memory:'memory',user_preference:'preference',constraint:'constraint',session_summary:'summary'};
   let legendSignature='';
   function decorateGraph(){const shown=applyLocalGraph();for(const element of nodeLayer.children){const node=nodeById(element.dataset.nodeId);if(!node)continue;element.classList.toggle('is-orphan',Number(node.edge_count)===0);element.dataset.type=node.type;let title=element.querySelector('title');if(!title){title=svg('title');element.prepend(title)}title.textContent=`#${node.id} ${node.title}\n${typeNames[node.type]||node.type} · ${node.edge_count} ${Number(node.edge_count)===1?'link':'links'}${node.pinned?' · pinned':''}`}
@@ -840,7 +914,7 @@ DASHBOARD_HTML = r'''<!doctype html>
   document.addEventListener('keydown',event=>{if(event.defaultPrevented||event.metaKey||event.ctrlKey||event.altKey)return;const tag=event.target?.tagName?.toLowerCase(),editing=['input','textarea','select'].includes(tag)||event.target?.isContentEditable;if(event.key==='Escape'){if(document.querySelector('dialog[open]'))return;if(controlsDock.classList.contains('open'))setControlsOpen(false);else if(graphUi.expanded)setGraphExpanded(false);else clearGraphSelection();return}if(editing)return;if(event.key==='/'){event.preventDefault();$('#search').focus()}else if(event.key==='0'){event.preventDefault();fitGraph()}else if(event.key==='+'||event.key==='='){event.preventDefault();zoomFromCenter(.82)}else if(event.key==='-'){event.preventDefault();zoomFromCenter(1.22)}else if(event.shiftKey&&event.key.toLowerCase()==='f'){event.preventDefault();setGraphExpanded(!graphUi.expanded)}});
 
   new ResizeObserver(()=>updateView()).observe(graphStage);updateView();
-  (async()=>{try{await loadSnapshot(false);decorateGraph();connectEvents()}catch(e){$('#status').textContent=`Could not load: ${e.message}`;$('#status').className='status';notice(e.message)}})();
+  (async()=>{try{await loadSnapshot(false);await loadScopeList();decorateGraph();connectEvents()}catch(e){$('#status').textContent=`Could not load: ${e.message}`;$('#status').className='status';notice(e.message)}})();
 })();
 </script>
 </body></html>'''

@@ -52,12 +52,12 @@ CREATE TABLE memories (
 | event_type | See enum below | Agent MUST provide | Category of knowledge. |
 | work_type | See enum below, nullable | Agent optional | Activity type that produced this memory. |
 | agent_type | See enum below | System auto-fill from env, agent override allowed | Who wrote it. |
-| project | Absolute path or NULL | System auto-fill from cwd, NULL=global | Scope isolation. |
+| project | Absolute path or NULL | System auto-fill from cwd, NULL=global | Scope isolation. An explicit project (param/`TRAILMEM_PROJECT`) must be an **absolute path** or the literal `"global"` — a bare name (e.g. `jarvis_build`) is **rejected**, since it silently splits a project's memories from its cwd-derived absolute-path form. Omit to auto-fill from cwd. |
 | session_id | Free text, nullable | System auto-fill from env var | Groups work within one session. |
 | source_uri | Free text, nullable | Agent optional | Origin: file path, session ref, URL. |
 | modified_files | Comma-separated paths, nullable | Agent optional | Files touched in this work. |
 | pinned | 0 or 1 | Agent sets | 1 = always in welcome, never buried. |
-| created_at | ISO 8601 timestamp | System | Immutable after creation. |
+| created_at | ISO 8601 timestamp | System | Immutable after creation. Stored in **UTC** (`datetime.now(UTC)`); human-facing surfaces (CLI, welcome, dashboard) render it in the **system local timezone** via `store.fmt_local()` so a memory made near UTC midnight is not shown on the wrong day. |
 | updated_at | ISO 8601 timestamp, nullable | System (on edit) | Set when content/title changes. |
 | access_count | Integer >= 0 | System (on query result) | NOT incremented on welcome. Only explicit queries. |
 | last_accessed | ISO 8601 timestamp, nullable | System (on query result) | |
@@ -126,7 +126,7 @@ def auto_fill(agent_input, env):
     return filled
 ```
 
-**`agent_type` is `NOT NULL` AND undetectable → hard reject, not silent "unknown".** `agent_type` has a required-with-fallback contract: auto-detect where possible, explicit override always allowed, but if BOTH fail the store errors rather than writing an unattributed row. This is the structural fix for the original NULL-agent bug — the rule lives in code, not in a reminder the agent can forget. (`project`/`session_id` degrade gracefully to cwd / NULL; only `agent_type` hard-rejects.)
+**`agent_type` is `NOT NULL` AND undetectable → hard reject, not silent "unknown".** `agent_type` has a required-with-fallback contract: auto-detect where possible, explicit override always allowed, but if BOTH fail the store errors rather than writing an unattributed row. This is the structural fix for the original NULL-agent bug — the rule lives in code, not in a reminder the agent can forget. (`project` auto-fills from cwd when omitted and `session_id` degrades to NULL; but an *explicitly supplied* non-absolute, non-`global` project hard-rejects — only `agent_type` hard-rejects on the detect path.)
 
 ---
 

@@ -33,6 +33,21 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def fmt_local(ts: str | None, *, date_only: bool = False) -> str:
+    """Render a stored UTC ISO timestamp in the system's local timezone.
+
+    Storage is UTC (spec-locked); this is display-only so a memory made at
+    03:35 UTC reads as 09:05 local instead of appearing on the wrong day.
+    """
+    if not ts:
+        return ""
+    dt = datetime.fromisoformat(ts).astimezone()
+    if date_only:
+        return dt.strftime("%Y-%m-%d")
+    return dt.strftime("%Y-%m-%d %H:%M %Z")
+
+
+
 def detect_agent(env=os.environ) -> str | None:
     if env.get("TRAILMEM_AGENT_TYPE"):
         return env["TRAILMEM_AGENT_TYPE"]
@@ -90,9 +105,20 @@ def resolve_agent(agent_type: str | None, env=os.environ) -> str:
 
 def resolve_project(project: str | None, env=os.environ) -> str | None:
     """Resolve project scope. The literal "global" (param or TRAILMEM_PROJECT)
-    maps to NULL = cross-project global scope; otherwise param > env > cwd."""
-    project = project or env.get("TRAILMEM_PROJECT") or os.getcwd()
-    return None if project == "global" else project
+    maps to NULL = cross-project global scope; otherwise param > env > cwd.
+
+    An explicitly supplied project (param or TRAILMEM_PROJECT) must be either
+    "global" or an absolute path — a bare name like "jarvis_build" is rejected,
+    because it silently splits a project's memories from its cwd-derived
+    absolute-path form. Omit the argument to auto-fill from cwd instead."""
+    explicit = project or env.get("TRAILMEM_PROJECT")
+    if explicit is not None and explicit != "global" and not os.path.isabs(explicit):
+        raise ValidationError(
+            f"project must be an absolute path or 'global', got {explicit!r}. "
+            "Omit it to use the current directory, or pass the full path.")
+    resolved = explicit or os.getcwd()
+    return None if resolved == "global" else resolved
+
 
 
 def _similar(conn: sqlite3.Connection, vec, limit: int = 3) -> list[dict]:
