@@ -55,6 +55,23 @@ def detect_agent(env=os.environ) -> str | None:
         return "claude"
     if env.get("KIRO_SESSION_ID"):
         return "kiro"
+    if env.get("ANTIGRAVITY_CONVERSATION_ID"):
+        return "antigravity"
+    if env.get("CODEX_THREAD_ID"):
+        return "codex"
+    return None
+
+
+# Host session-id env vars, in priority order. One list so every call site
+# (MCP server, CLI, statusline, store) reads the same set — no drift.
+_SESSION_ENV = ("CLAUDE_CODE_SESSION_ID", "KIRO_SESSION_ID",
+                "ANTIGRAVITY_CONVERSATION_ID", "CODEX_THREAD_ID")
+
+
+def session_id_from_env(env=os.environ) -> str | None:
+    for key in _SESSION_ENV:
+        if env.get(key):
+            return env[key]
     return None
 
 
@@ -162,7 +179,7 @@ def store(
     warnings = validate(title, content, event_type, work_type)
     agent = resolve_agent(agent_type, env)
     project = resolve_project(project, env)
-    session_id = session_id or env.get("CLAUDE_CODE_SESSION_ID") or env.get("KIRO_SESSION_ID")
+    session_id = session_id or session_id_from_env(env)
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     cfg = load_config()["embedding"]
 

@@ -25,7 +25,7 @@ def _conn():
 def _ctx(agent=None):
     agent = store_mod.resolve_agent(agent)
     proj = store_mod.resolve_project(None)
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("KIRO_SESSION_ID")
+    sid = store_mod.session_id_from_env()
     return agent, proj, sid
 
 
@@ -416,7 +416,7 @@ def cmd_statusline(a) -> int:
                 sid = json.loads(sys.stdin.read() or "{}").get("session_id")
             except Exception:
                 sid = None
-        sid = sid or os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("KIRO_SESSION_ID")
+        sid = sid or store_mod.session_id_from_env()
         if not sid:
             return 0  # no session context → say nothing
         n = _conn().execute(
