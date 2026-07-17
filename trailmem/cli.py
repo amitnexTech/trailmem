@@ -402,6 +402,35 @@ def cmd_reindex(a) -> int:
     return models.reindex(_conn())
 
 
+# ---- statusline (never fail the host; read-only COUNT) ----
+
+def cmd_statusline(a) -> int:
+    """One-line status for a host statusline: how many memories this session
+    stored. Reads session_id from stdin JSON (Claude Code) or the usual env
+    vars. Prints nothing-noisy on failure — a statusline must never break."""
+    try:
+        sid = None
+        if not sys.stdin.isatty():
+            import json
+            try:
+                sid = json.loads(sys.stdin.read() or "{}").get("session_id")
+            except Exception:
+                sid = None
+        sid = sid or os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("KIRO_SESSION_ID")
+        if not sid:
+            return 0  # no session context → say nothing
+        n = _conn().execute(
+            "SELECT COUNT(*) FROM memories WHERE session_id = ?", (sid,)
+        ).fetchone()[0]
+        if n > 0:
+            print(f"🧠 trailmem: {n} saved this session")
+        else:
+            print("⚠ trailmem: 0 saved this session · /tm-save before exit")
+    except Exception:
+        pass  # statusline must never emit an error or block the host
+    return 0
+
+
 # ---- hooks (never fail the host session) ----
 
 def cmd_hook(a) -> int:
@@ -588,6 +617,9 @@ def main(argv=None) -> int:
     s.add_argument("--hard", action="store_true")
     s.add_argument("--confirm", action="store_true")
     s.set_defaults(func=cmd_delete)
+
+    s = sub.add_parser("statusline", help="One-line session status for a host statusline")
+    s.set_defaults(func=cmd_statusline)
 
     s = sub.add_parser("hook", help="Host lifecycle hooks (always exit 0)")
     s.add_argument("event", choices=["session-start", "session-stop"])

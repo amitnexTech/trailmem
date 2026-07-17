@@ -59,6 +59,17 @@ Other hosts (Kiro/Codex/OpenCode) register the same two commands in their own ho
 2. **No memory creation** (locked Q10 — no junk). No summary generation. No prompts.
 3. Non-critical by design: if it never fires (crash, `/exit`, MCP down), the boundary for the next session is still correct via `started_at`.
 
+## Save-awareness (the `/exit` gap)
+
+A host end-of-session hook runs *after* the agent is gone and never sees the conversation, so it cannot capture memory. The only reliable capture point is the live agent, mid-session. Four complementary, LLM-free surfaces close the gap:
+
+1. **`/tm-save` command** — a Claude Code slash command (installed by `trailmem integrate` into `~/.claude/commands/tm-save.md`) that instructs the still-alive agent to extract this session's decisions/lessons/tasks and store them via `trailmem_store` (English, typed, linked, no filler). Run it before `/exit`.
+2. **Welcome tip** — the full welcome briefing ends with a one-line reminder to run `/tm-save` before exit. Universal across hosts.
+3. **`trailmem statusline`** — a CLI that reads `session_id` from stdin JSON (Claude Code) or env, counts `memories WHERE session_id = ?`, and prints a one-line status: `🧠 trailmem: N saved this session`, or an amber `⚠ trailmem: 0 saved · /tm-save before exit` when nothing has been stored yet. Read-only, always exits 0. Wire it into a host statusline; for hosts without one, run it standalone.
+4. **Next-session flag** — if a prior session (same agent) registered but stored **zero** memories, the next welcome opens with a loud `🛑 LAST SESSION SAVED 0 MEMORIES` line. This is the backup for a forgotten `/tm-save`.
+
+None of these auto-generate memory content (that stays the agent's job — the anti-bloat rule holds); they only surface the gap and give the user/agent a one-command way to act on it.
+
 ## Failure Matrix
 
 | Failure | Effect | Recovery |

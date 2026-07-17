@@ -164,6 +164,18 @@ trailmem reindex
 
 Model config lives in `~/.trailmem/config.json`. Dedup thresholds (0.85/0.92) are per-model — swapping without `reindex` leaves stale bands. See [[schema]] embedding section and [[dedup]].
 
+### HOST Integration
+
+```bash
+# One-line session status for a host statusline (reads session_id from stdin
+# JSON or CLAUDE_CODE_SESSION_ID/KIRO_SESSION_ID env; read-only, always exit 0)
+trailmem statusline
+#   → 🧠 trailmem: N saved this session      (N > 0)
+#   → ⚠ trailmem: 0 saved this session · /tm-save before exit   (N = 0)
+```
+
+See [[hooks]] for how this fits the save-awareness surfaces (`/tm-save`, welcome tip, next-session flag).
+
 ### HIDDEN Commands (rare, destructive)
 
 ```bash

@@ -48,7 +48,15 @@ trailmem doctor         # health check
 trailmem integrate      # detects installed agent hosts, asks before writing any config
 ```
 
-`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead).
+`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead). On Claude Code it also installs a `/tm-save` slash command.
+
+### Saving a session before you exit
+
+An agent that forgets to record memory (or a hard `/exit`) can drop a session's context — a host end-of-session hook can't help, because it runs after the agent is gone. Three things guard against that:
+
+- **`/tm-save`** (Claude Code) — tell the still-running agent to store this session's decisions, lessons, and open tasks. Run it before `/exit`.
+- **Statusline** — `trailmem statusline` prints `🧠 trailmem: N saved this session`, or `⚠ 0 saved · /tm-save before exit` when nothing has been captured yet. Wire it into your host's statusline for an always-visible count.
+- **Next-session flag** — if the previous session stored nothing, the next welcome opens with a loud reminder.
 
 Prefer manual registration? Each host has its own mechanism:
 

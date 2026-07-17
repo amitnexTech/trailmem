@@ -154,6 +154,20 @@ JSON_HOSTS = [
 ]
 
 
+def _install_claude_command() -> str:
+    """Copy the bundled /tm-save slash command into ~/.claude/commands/.
+    Claude Code reads *.md command files from there; other hosts ignore it."""
+    from importlib import resources
+    dest_dir = Path.home() / ".claude" / "commands"
+    dest = dest_dir / "tm-save.md"
+    body = resources.files("trailmem").joinpath("commands/tm-save.md").read_text()
+    if dest.exists() and dest.read_text() == body:
+        return "already installed"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body)
+    return f"installed {dest}"
+
+
 def _hosts() -> list[tuple]:
     hosts = [
         ("Claude Code", _claude_detect, _claude_integrate),
@@ -197,5 +211,10 @@ def run() -> int:
         except Exception as exc:
             failures += 1
             print(f"  {name}: ✗ {exc}")
+    if any(name == "Claude Code" for name, _ in found):
+        try:
+            print(f"  Claude Code /tm-save command: {_install_claude_command()}")
+        except Exception as exc:
+            print(f"  Claude Code /tm-save command: ✗ {exc}")
     print("Restart the agent(s) to pick up the new MCP server.")
     return 1 if failures else 0

@@ -35,6 +35,16 @@ def welcome(conn: sqlite3.Connection, session_id: str, agent_type: str,
         (agent_type, session_id),
     ).fetchone()[0]
 
+    # Prior session (this agent) that registered but stored nothing — a likely
+    # "forgot to save" lapse. Detected here so the NEXT session surfaces it.
+    prior_zero = conn.execute(
+        "SELECT s.session_id FROM sessions s "
+        "WHERE s.agent_type = ? AND s.session_id != ? "
+        "AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.session_id = s.session_id) "
+        "ORDER BY s.started_at DESC LIMIT 1",
+        (agent_type, session_id),
+    ).fetchone()
+
     # Step 2: atomic read-prior + register (BEGIN IMMEDIATE = write lock).
     ts = now()
     conn.execute("BEGIN IMMEDIATE")
@@ -153,8 +163,16 @@ def welcome(conn: sqlite3.Connection, session_id: str, agent_type: str,
     if alerts:
         out.append("\n⚠️ ACTION NEEDED\n⚠ " + ", ".join(alerts))
 
+    # Prior-session lapse: last session (this agent) stored nothing. Loud, so
+    # the agent/user notices the gap and captures going forward.
+    if prior_zero:
+        out.append("\n🛑 LAST SESSION SAVED 0 MEMORIES — likely un-captured work. "
+                   "Store this session's decisions/lessons/tasks before exit.")
+
     # Section 7: stats, always.
     out.append("\n" + stats)
+    out.append("💡 Tip: run /tm-save (or ask me to save) before you exit — "
+               "I'll store this session's decisions, lessons, and open tasks.")
     return "\n".join(out).lstrip("\n")
 
 
