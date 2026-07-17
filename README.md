@@ -1,5 +1,9 @@
 # trailmem
 
+[![PyPI](https://img.shields.io/pypi/v/trailmem)](https://pypi.org/project/trailmem/)
+[![Python](https://img.shields.io/pypi/pyversions/trailmem)](https://pypi.org/project/trailmem/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Persistent, local-first graph memory for AI coding agents.**
 
 Trailmem gives agents durable cross-session memory without provider lock-in: a local SQLite knowledge graph, typed relationships, explicit knowledge evolution, and token-disciplined briefings. It is designed for multiple local agents—Claude, Kiro, Codex, OpenCode, Kilo, and Gemini—to share useful project knowledge without silently creating junk memories.
