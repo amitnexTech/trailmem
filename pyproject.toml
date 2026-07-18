@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trailmem"
-version = "0.1.6"
+version = "0.1.7"
 description = "Local-first, graph-linked persistent memory for AI coding agents (MCP server + CLI)"
 readme = "README.md"
 license = "MIT"
@@ -20,11 +20,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 # Every dependency bounded BOTH sides — ship only combinations known to work.
-# onnxruntime <1.22: 1.2x DLLs need VC++ runtime 14.40+ and crash DllMain on
-# stock Windows (WinError 1114); 1.19-1.21 load clean.
+# onnxruntime <1.21: 1.21.x DLLs need VC++ runtime 14.40+ (VS2022) and crash
+# DllMain on stock Windows with 14.28 (WinError 1114); 1.19-1.20 load clean.
 dependencies = [
     "sqlite-vec>=0.1.6,<0.2.0",
-    "onnxruntime>=1.17,<1.22",
+    "onnxruntime>=1.17,<1.21",
     "tokenizers>=0.15,<1.0",
     "numpy>=1.24,<3.0",
     "mcp>=1.2,<2.0",
