@@ -78,7 +78,7 @@ Save new memory with optional linking + supersede in one call.
 | title | string | YES | — | 3-60 chars, descriptive label |
 | content | string | YES | — | 50+ chars (soft warn >4000) |
 | event_type | string | YES | — | decision/lesson/error_pattern/task/memory/user_preference/constraint/session_summary |
-| agent_type | string | No | auto from env | kiro/claude/codex/opencode/kilo/antigravity/user |
+| agent_type | string | No | auto from env | kiro/claude/codex/opencode/kilo/antigravity/zed/cursor/windsurf/user |
 | project | string | No | auto from cwd | NULL = global. If supplied, must be an absolute path or `"global"`; a bare name is rejected. |
 | work_type | string | No | null | discussion/file-edit/code-written/bug-fix/research/setup/review |
 | source_uri | string | No | null | Origin reference |
