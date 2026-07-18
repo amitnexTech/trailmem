@@ -123,7 +123,12 @@ trailmem integrate
 # Antigravity / Zed / Cursor / Windsurf
 # via their MCP config files) and, ONLY after an explicit y/N prompt, writes each host's
 # own MCP config. Per-host config differs: Claude Code uses `claude mcp add`; others get
-# their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem -- trailmem-mcp`.)
+# their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem
+# -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server`.)
+# Server launch is ALWAYS `<python> -u -m trailmem.mcp_server` — the generated
+# `trailmem-mcp` script was removed in 0.1.7: Windows Smart App Control blocks unsigned
+# per-install launcher .exes, silently killing host-spawned servers. integrate upgrades
+# old trailmem-mcp entries to the python -m shape in place (env pins preserved).
 # EVERY entry pins TRAILMEM_AGENT_TYPE=<host> in the entry's env map — hosts spawn MCP
 # servers with a clean env (no session vars reach the server process; verified live for
 # Codex and Kilo), so config-entry env is the only reliable attribution path. Env-key name
@@ -131,9 +136,11 @@ trailmem integrate
 # `env` (Codex: TOML inline table; Claude Code: `claude mcp add -e`). Re-running integrate
 # UPGRADES an existing entry that lacks the env map instead of skipping it. Codex also gets
 # ~/.codex/prompts/trailmem-save.md → /prompts:trailmem-save (no MCP-prompt support there).
-# ANY other MCP agent works manually: stdio transport, command `trailmem-mcp`, and set
-# TRAILMEM_AGENT_TYPE in the entry's env for attribution.
-# README has the generic guide ("Any other MCP agent") with the common JSON shape + `which trailmem-mcp` for the absolute path.
+# ANY other MCP agent works manually: stdio transport, command `<python> -u -m
+# trailmem.mcp_server`, and set TRAILMEM_AGENT_TYPE in the entry's env for attribution.
+# README has the generic guide ("Any other MCP agent") with the common JSON shape;
+# the right <python> is printed by `python -c "import sys; print(sys.executable)"` from
+# the environment trailmem is installed into.
 
 # Health check
 trailmem doctor
@@ -145,8 +152,31 @@ trailmem update
 # was installed (uv tool → `uv tool install trailmem@latest --force` — a once-pinned
 # tool makes bare `uv tool upgrade` a no-op; pipx → `pipx upgrade`; else pip -U).
 # Editable/dev installs are refused (update via git). After upgrading it reminds
-# the user to restart agents — schema migrations run on first new-code start and
+# the user to run `trailmem integrate` (refreshes host configs — old entries are
+# upgraded in place when the launch shape changed, e.g. pre-0.1.7 trailmem-mcp)
+# and then restart agents — schema migrations run on first new-code start and
 # old servers must not keep writing.
+
+# Uninstall (surgical reversal of integrate; memories KEPT by default)
+trailmem uninstall
+# After one y/N prompt, SURGICALLY removes only trailmem's own artifacts and leaves
+# everything else in each config intact: the `trailmem` entry in every JSON host config
+# (Kiro/Kilo/OpenCode/Antigravity/Zed/Cursor/Windsurf), the Codex
+# `[mcp_servers.trailmem]` TOML table, the Claude Code registration (via `claude mcp
+# remove --scope user`), the usage skill at <skills>/trailmem/SKILL.md
+# (claude/codex/kilo/opencode), ~/.claude/commands/tm-save.md, and
+# ~/.codex/prompts/trailmem-save.md. The one-time .bak-trailmem backups are NOT
+# restored (the user may have edited configs since integrate); unparseable JSONC
+# configs are never rewritten — a manual-removal instruction is printed instead.
+# ~/.trailmem (ALL memories) is KEPT by default: most uninstalls are temporary
+# (reinstall/upgrade/broken install) and reinstalling restores every memory
+# automatically. The run ends by printing the package-removal command for the
+# detected install method (uv tool / pipx / pip) — printed, never auto-run: a live
+# process cannot reliably delete itself.
+
+trailmem uninstall --purge
+# DESTRUCTIVE: additionally deletes ~/.trailmem (every memory, irreversible) after a
+# second typed 'purge' confirmation.
 ```
 
 ### MODEL Management (embedding model is user-configurable)

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from . import embeddings
 from .config import load_config
+from .schema import has_vec
 
 EVENT_TYPES = {
     "decision", "lesson", "error_pattern", "task",
@@ -205,6 +206,10 @@ def store(
 
     # Band 2-4: embedding similarity (skipped in FTS-only mode).
     vec = embeddings.embed(content)
+    if vec is not None and not has_vec(conn):
+        # sqlite-vec extension failed to load on this connection → the
+        # memories_vec table is absent; touching it would kill the store.
+        vec = None
     neighbours = _similar(conn, vec) if vec is not None else []
     top = neighbours[0] if neighbours else None
     if top and top["similarity"] > cfg["dedup_block"] and not force:

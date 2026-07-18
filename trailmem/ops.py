@@ -9,6 +9,7 @@ import sqlite3
 
 from . import embeddings
 from .queries import edge_count, resolve_ref
+from .schema import has_vec
 from .store import EDGE_TYPES, EVENT_TYPES, ValidationError, now
 
 
@@ -70,7 +71,7 @@ def edit(
             (node_id, new_title, content),
         )
         vec = embeddings.embed(content)
-        if vec is not None:
+        if vec is not None and has_vec(conn):
             conn.execute("DELETE FROM memories_vec WHERE node_id = ?", (node_id,))
             conn.execute(
                 "INSERT INTO memories_vec (node_id, embedding) VALUES (?, ?)",

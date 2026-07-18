@@ -89,7 +89,7 @@ The `save_session` prompt body and the `tm-save.md` file carry the *same* instru
 ### The reminders — so the user remembers to trigger a save
 
 - **Welcome tip** — the full welcome briefing ends with a one-line reminder to save before exit. Universal across hosts.
-- **`trailmem statusline`** — a CLI that reads `session_id` from stdin JSON (Claude Code) or env, counts `memories WHERE session_id = ?`, and prints a one-line status: `🧠 trailmem: N saved this session`, or an amber `⚠ trailmem: 0 saved · save before exit` when nothing has been stored yet. Read-only, always exits 0. Wire it into a host statusline; for hosts without one, run it standalone.
+- **`trailmem statusline`** — a CLI that reads `session_id` from stdin JSON (Claude Code) or env, counts `memories WHERE session_id = ?`, and prints a one-line status: `🧠 trailmem: N saved this session`, or an amber `⚠ trailmem: 0 saved · save before exit` when nothing has been stored yet (non-UTF consoles get ASCII marks `[TM]`/`[!]` instead of emoji — 0.1.7 console fallback). Read-only, always exits 0. Wire it into a host statusline; for hosts without one, run it standalone.
 - **Next-session flag** — if a prior session (same agent) registered but stored **zero** memories, the next welcome opens with a loud `🛑 LAST SESSION SAVED 0 MEMORIES` line. The backup for a forgotten save.
 
 None of these auto-generate memory content (that stays the agent's job — the anti-bloat rule holds); they only surface the gap and give the user/agent a one-command way to act on it.

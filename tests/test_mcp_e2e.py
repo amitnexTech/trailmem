@@ -1,4 +1,5 @@
-"""E2E: spawn trailmem-mcp over stdio as a real MCP client and exercise all 6 tools."""
+"""E2E: spawn the MCP server over stdio (python -m — the canonical launch
+shape since the trailmem-mcp script was removed) and exercise all 6 tools."""
 
 import asyncio
 import os
@@ -7,7 +8,8 @@ import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-VENV = "/home/amit/trailmem/.venv/bin/trailmem-mcp"
+PYTHON = "/home/amit/trailmem/.venv/bin/python"
+SERVER_ARGS = ["-u", "-m", "trailmem.mcp_server"]
 ENV = {
     **os.environ,
     "TRAILMEM_HOME": "/tmp/tm-mcp-e2e",
@@ -30,7 +32,9 @@ async def run():
     # reuse the already-downloaded model
     shutil.copytree("/tmp/tm-test-home/models/bge-small", "/tmp/tm-mcp-e2e/models/bge-small")
 
-    async with stdio_client(StdioServerParameters(command=VENV, env=ENV)) as (read, write):
+    async with stdio_client(
+        StdioServerParameters(command=PYTHON, args=SERVER_ARGS, env=ENV)
+    ) as (read, write):
         async with ClientSession(read, write) as sess:
             await sess.initialize()
             tools = {t.name for t in (await sess.list_tools()).tools}

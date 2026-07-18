@@ -3,12 +3,14 @@
 No hash-embedding pseudo-vectors — degrade loudly, never fake similarity.
 """
 
+import sys
 from pathlib import Path
 
 from .config import MODELS_DIR, load_config
 
 _session = None
 _tokenizer = None
+_broken = False  # onnxruntime failed to load once — stay in FTS-only mode
 
 
 def _model_dir() -> Path:
@@ -51,18 +53,31 @@ def embed(text: str):
     numpy/onnxruntime/tokenizers are imported here, not at module top —
     FTS-only mode must work without the embedding deps installed.
     """
-    global _session, _tokenizer
-    if not available():
+    global _session, _tokenizer, _broken
+    if _broken or not available():
         return None
-    import numpy as np
-    import onnxruntime
-    from tokenizers import Tokenizer
+    try:
+        import numpy as np
 
-    if _session is None:
-        d = _model_dir()
-        _session = onnxruntime.InferenceSession(str(d / "model.onnx"))
-        _tokenizer = Tokenizer.from_file(str(d / "tokenizer.json"))
-        _tokenizer.enable_truncation(max_length=512)
+        if _session is None:
+            # available() checks config+files only; the import itself can die
+            # (Windows: onnxruntime DLL init fails with WinError 1114 even when
+            # installed). Degrade to FTS-only instead of killing store/query.
+            import onnxruntime
+            from tokenizers import Tokenizer
+
+            d = _model_dir()
+            _session = onnxruntime.InferenceSession(str(d / "model.onnx"))
+            _tokenizer = Tokenizer.from_file(str(d / "tokenizer.json"))
+            _tokenizer.enable_truncation(max_length=512)
+    except Exception as e:
+        _broken = True
+        # ASCII-only message: this can fire before console.configure() on a
+        # cp1252 stderr — the warning itself must never be the crash.
+        print(f"trailmem: embedding runtime unavailable ({e}) - "
+              "continuing in FTS-only mode (keyword search, exact-hash dedup)",
+              file=sys.stderr)
+        return None
 
     enc = _tokenizer.encode(text)
     inputs = {

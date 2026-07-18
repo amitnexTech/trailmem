@@ -4,11 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trailmem"
-version = "0.1.6"
+version = "0.1.7"
 description = "Local-first, graph-linked persistent memory for AI coding agents (MCP server + CLI)"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+# <3.13: onnxruntime has no wheels beyond 3.12 yet; without a ceiling uv
+# resolves 3.14 and the install dies (Windows finding #2).
+requires-python = ">=3.10,<3.13"
 authors = [{ name = "Amit Kushwaha", email = "amitkushwaha2805@gmail.com" }]
 keywords = ["mcp", "memory", "ai-agents", "knowledge-graph", "sqlite"]
 classifiers = [
@@ -17,21 +19,26 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Libraries",
 ]
+# Every dependency bounded BOTH sides — ship only combinations known to work.
+# onnxruntime <1.21: 1.21.x DLLs need VC++ runtime 14.40+ (VS2022) and crash
+# DllMain on stock Windows with 14.28 (WinError 1114); 1.19-1.20 load clean.
 dependencies = [
-    "sqlite-vec<0.2.0",
-    "onnxruntime",
-    "tokenizers",
-    "numpy",
-    "orjson",
-    "mcp",
+    "sqlite-vec>=0.1.6,<0.2.0",
+    "onnxruntime>=1.17,<1.21",
+    "tokenizers>=0.15,<1.0",
+    "numpy>=1.24,<3.0",
+    "mcp>=1.2,<2.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/amit/trailmem"
 
+# Server script deliberately absent: Windows Smart App Control blocks
+# per-install unsigned launcher .exes, silently killing a host-spawned server.
+# Canonical server launch is `python -u -m trailmem.mcp_server` (see integrate).
+# The interactive CLI keeps its script — a blocked CLI is visible, not silent.
 [project.scripts]
 trailmem = "trailmem.cli:main"
-trailmem-mcp = "trailmem.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["trailmem"]

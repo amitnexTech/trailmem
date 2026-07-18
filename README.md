@@ -50,6 +50,8 @@ trailmem integrate      # detects installed agent hosts, asks before writing any
 
 `trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead). On Claude Code it also installs a `/tm-save` slash command. On hosts that read Agent Skills (Claude Code, Codex, Kilo, OpenCode) it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source.
 
+> **Windows note:** the MCP server is registered as `python -u -m trailmem.mcp_server` — never as a generated `.exe`. Windows **Smart App Control** silently blocks unsigned per-install launcher `.exe`s (the kind pip/uv generate), which kills a host-spawned server with no error anywhere. If the `trailmem` CLI itself is blocked by SAC, run it as `python -m trailmem` from the environment it's installed into.
+
 ### Saving a session before you exit
 
 An agent that forgets to record memory (or a hard `/exit`) can drop a session's context — a host end-of-session hook can't help, because it runs after the agent is gone and never sees the conversation. Only the live agent, mid-session, can capture. trailmem gives it a portable trigger plus reminders.
@@ -74,12 +76,14 @@ Clients with no prompt support (e.g. **Codex**, **aider**) use the plain-text pa
 
 Prefer manual MCP registration? Each host has its own mechanism:
 
+The server launch command everywhere is `<python> -u -m trailmem.mcp_server`, where `<python>` is the interpreter trailmem is installed into (print it: `trailmem doctor` shows the home; or `python -c "import sys; print(sys.executable)"` inside that environment). Add `TRAILMEM_AGENT_TYPE=<host>` to the entry's env so memories are attributed correctly.
+
 | Host | Manual registration |
 |------|--------------------|
-| Claude Code | `claude mcp add trailmem -- trailmem-mcp` |
+| Claude Code | `claude mcp add trailmem -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server` |
 | Codex | add an `[mcp_servers.trailmem]` table to `~/.codex/config.toml` |
 | Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
-| Kilo | add `trailmem` under `mcp` in `~/.config/kilo/kilo.jsonc` as `{"type":"local","command":["trailmem-mcp"]}` (kilo 7.x format) |
+| Kilo | add `trailmem` under `mcp` in `~/.config/kilo/kilo.jsonc` as `{"type":"local","command":["<python>","-u","-m","trailmem.mcp_server"]}` (kilo 7.x format) |
 | OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
 | Antigravity | add `trailmem` under `mcpServers` in `~/.gemini/config/mcp_config.json` |
 | Zed | add `trailmem` under `context_servers` in `~/.config/zed/settings.json` |
@@ -91,8 +95,8 @@ Prefer manual MCP registration? Each host has its own mechanism:
 Trailmem works with **any agent that speaks MCP** — Cursor, Windsurf, Cline, Zed, Gemini CLI, or anything newer. `trailmem integrate` only automates the hosts above; for everything else, register it yourself. You need exactly three facts:
 
 1. **Transport:** stdio (no URL, no port, no HTTP).
-2. **Command:** `trailmem-mcp` — no arguments, no environment variables required.
-3. **Server name:** `trailmem` (any name works; tool names don't depend on it).
+2. **Command:** `<python> -u -m trailmem.mcp_server` — the interpreter trailmem is installed into, launched as a module. There is deliberately no `trailmem-mcp` executable: Windows Smart App Control silently blocks per-install unsigned launcher `.exe`s, which killed host-spawned servers with no error. `python -m` needs no launcher and works on every OS.
+3. **Server name:** `trailmem` (any name works; tool names don't depend on it). Set `TRAILMEM_AGENT_TYPE=<agent>` in the entry's env for correct attribution.
 
 Most agents use a JSON block shaped like this (key name varies — `mcpServers`, `mcp`, `servers`):
 
@@ -100,17 +104,18 @@ Most agents use a JSON block shaped like this (key name varies — `mcpServers`,
 {
   "mcpServers": {
     "trailmem": {
-      "command": "trailmem-mcp",
-      "args": []
+      "command": "/path/to/python",
+      "args": ["-u", "-m", "trailmem.mcp_server"],
+      "env": { "TRAILMEM_AGENT_TYPE": "cursor" }
     }
   }
 }
 ```
 
-If the agent can't find the command, use the absolute path — print it with:
+Print the right interpreter path from inside the environment trailmem is installed into:
 
 ```bash
-which trailmem-mcp        # Windows: where trailmem-mcp
+python -c "import sys; print(sys.executable)"
 ```
 
 Then restart the agent and check the wiring: the agent should see six `trailmem_*` tools, and calling `trailmem_welcome` should return a briefing. `trailmem doctor` verifies the database side.
@@ -121,7 +126,7 @@ Then restart the agent and check the wiring: the agent should see six `trailmem_
 trailmem update   # checks PyPI, upgrades in place using however you installed it
 ```
 
-`trailmem update` detects whether this copy was installed with uv / pipx / pip and runs the right upgrade command (uv-tool installs need `uv tool install trailmem@latest --force` — a bare `uv tool upgrade` is a no-op on a pinned tool, which `trailmem update` handles for you). Editable/dev installs are refused (upgrade via git). After upgrading, **restart your agents** so their MCP servers reload — a schema migration runs on first start of the new code, and a still-running old server must not keep writing.
+`trailmem update` detects whether this copy was installed with uv / pipx / pip and runs the right upgrade command (uv-tool installs need `uv tool install trailmem@latest --force` — a bare `uv tool upgrade` is a no-op on a pinned tool, which `trailmem update` handles for you). Editable/dev installs are refused (upgrade via git). After upgrading, run **`trailmem integrate`** once to refresh host configs (it upgrades old entries in place — e.g. the pre-0.1.7 `trailmem-mcp` launch to the current `python -m` shape), then **restart your agents** so their MCP servers reload — a schema migration runs on first start of the new code, and a still-running old server must not keep writing.
 
 Prefer to do it by hand:
 
@@ -132,6 +137,15 @@ pip install --upgrade trailmem             # if installed with pip (inside the v
 ```
 
 There is no in-app "update available" notice — trailmem sends no telemetry, by design. `trailmem update` only checks PyPI when you run it.
+
+### Uninstalling
+
+```bash
+trailmem uninstall           # remove trailmem from agent configs — memories are KEPT
+trailmem uninstall --purge   # ALSO delete ~/.trailmem (every memory, irreversible)
+```
+
+`trailmem uninstall` surgically reverses everything `integrate` wrote — the `trailmem` MCP entry in each host's config, the usage skills, `/tm-save`, the Codex prompt — and leaves the rest of every config untouched. **Your memories at `~/.trailmem` are kept by default**: reinstalling trailmem later brings them all back automatically. Only `--purge` (with a typed confirmation) deletes them. At the end it prints the command to remove the package itself (`uv tool uninstall trailmem` / `pipx uninstall trailmem` / `pip uninstall trailmem`, matching how you installed).
 
 The agent then gets six tools: `trailmem_welcome` (once-per-session briefing), `trailmem_store`, `trailmem_query`, `trailmem_show`, `trailmem_edit`, `trailmem_link`. Everything is also available to humans via the `trailmem` CLI (`store`, `query`, `show`, `list`, `stats`, `link`, `archive`, ...).
 

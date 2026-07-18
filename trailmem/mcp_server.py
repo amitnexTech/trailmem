@@ -12,7 +12,7 @@ import sqlite3
 
 from mcp.server.fastmcp import FastMCP
 
-from . import ops, queries, sessions, store as store_mod
+from . import console, ops, queries, sessions, store as store_mod
 from .schema import connect, init_db
 from .store import ValidationError
 
@@ -271,6 +271,9 @@ def save_session() -> str:
 
 
 def main() -> None:
+    # UTF-8 crash guard: MCP JSON-RPC is UTF-8; a cp1252 stdout on Windows can
+    # otherwise raise mid-message. stderr carries our degrade warnings.
+    console.configure()
     mcp.run()
 
 
