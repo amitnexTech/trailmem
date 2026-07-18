@@ -156,6 +156,27 @@ trailmem update
 # upgraded in place when the launch shape changed, e.g. pre-0.1.7 trailmem-mcp)
 # and then restart agents — schema migrations run on first new-code start and
 # old servers must not keep writing.
+
+# Uninstall (surgical reversal of integrate; memories KEPT by default)
+trailmem uninstall
+# After one y/N prompt, SURGICALLY removes only trailmem's own artifacts and leaves
+# everything else in each config intact: the `trailmem` entry in every JSON host config
+# (Kiro/Kilo/OpenCode/Antigravity/Zed/Cursor/Windsurf), the Codex
+# `[mcp_servers.trailmem]` TOML table, the Claude Code registration (via `claude mcp
+# remove --scope user`), the usage skill at <skills>/trailmem/SKILL.md
+# (claude/codex/kilo/opencode), ~/.claude/commands/tm-save.md, and
+# ~/.codex/prompts/trailmem-save.md. The one-time .bak-trailmem backups are NOT
+# restored (the user may have edited configs since integrate); unparseable JSONC
+# configs are never rewritten — a manual-removal instruction is printed instead.
+# ~/.trailmem (ALL memories) is KEPT by default: most uninstalls are temporary
+# (reinstall/upgrade/broken install) and reinstalling restores every memory
+# automatically. The run ends by printing the package-removal command for the
+# detected install method (uv tool / pipx / pip) — printed, never auto-run: a live
+# process cannot reliably delete itself.
+
+trailmem uninstall --purge
+# DESTRUCTIVE: additionally deletes ~/.trailmem (every memory, irreversible) after a
+# second typed 'purge' confirmation.
 ```
 
 ### MODEL Management (embedding model is user-configurable)

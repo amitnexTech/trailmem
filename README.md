@@ -138,6 +138,15 @@ pip install --upgrade trailmem             # if installed with pip (inside the v
 
 There is no in-app "update available" notice — trailmem sends no telemetry, by design. `trailmem update` only checks PyPI when you run it.
 
+### Uninstalling
+
+```bash
+trailmem uninstall           # remove trailmem from agent configs — memories are KEPT
+trailmem uninstall --purge   # ALSO delete ~/.trailmem (every memory, irreversible)
+```
+
+`trailmem uninstall` surgically reverses everything `integrate` wrote — the `trailmem` MCP entry in each host's config, the usage skills, `/tm-save`, the Codex prompt — and leaves the rest of every config untouched. **Your memories at `~/.trailmem` are kept by default**: reinstalling trailmem later brings them all back automatically. Only `--purge` (with a typed confirmation) deletes them. At the end it prints the command to remove the package itself (`uv tool uninstall trailmem` / `pipx uninstall trailmem` / `pip uninstall trailmem`, matching how you installed).
+
 The agent then gets six tools: `trailmem_welcome` (once-per-session briefing), `trailmem_store`, `trailmem_query`, `trailmem_show`, `trailmem_edit`, `trailmem_link`. Everything is also available to humans via the `trailmem` CLI (`store`, `query`, `show`, `list`, `stats`, `link`, `archive`, ...).
 
 Try it from the CLI (note: `content` is positional; `--agent user` for your own notes):

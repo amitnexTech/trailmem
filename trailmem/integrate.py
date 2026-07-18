@@ -16,6 +16,7 @@ one JSON_HOSTS line (or a detect/integrate pair for exotic formats).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -352,4 +353,167 @@ def run() -> int:
         except Exception as exc:
             print(f"  Claude Code /tm-save command: {bad} {exc}")
     print("Restart the agent(s) to pick up the new MCP server.")
+    return 1 if failures else 0
+
+
+# ---- uninstall ----
+# Surgical reversal of everything integrate wrote: only the trailmem
+# key/table/files are removed, the rest of every config stays byte-identical
+# in meaning. The .bak-trailmem backups are deliberately NOT restored — the
+# user may have edited configs (or re-run integrate) after they were taken.
+
+
+def _remove_json_map(path: Path, key: str) -> str | None:
+    """Drop SERVER_NAME from `key` in a JSON config. None = nothing of ours."""
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        raise RuntimeError(
+            f'{path} is not plain JSON (comments/JSONC?) — remove the '
+            f'"{SERVER_NAME}" entry under "{key}" manually'
+        )
+    servers = data.get(key)
+    if not isinstance(servers, dict) or SERVER_NAME not in servers:
+        return None
+    del servers[SERVER_NAME]
+    _write_json(path, data)
+    return f"removed entry from {path}"
+
+
+def _claude_remove() -> str | None:
+    if shutil.which("claude") is None:
+        return None
+    got = subprocess.run(
+        ["claude", "mcp", "get", SERVER_NAME], capture_output=True, text=True, timeout=15
+    )
+    if got.returncode != 0:
+        return None
+    result = subprocess.run(
+        ["claude", "mcp", "remove", "--scope", "user", SERVER_NAME],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "`claude mcp remove` failed")
+    return "removed via `claude mcp remove --scope user`"
+
+
+def _codex_remove_toml() -> str | None:
+    path = _HOME() / ".codex" / "config.toml"
+    if not path.exists():
+        return None
+    text = path.read_text()
+    header = f"[mcp_servers.{SERVER_NAME}]"
+    if header not in text:
+        return None
+    start = text.index(header)
+    end = text.find("\n[", start + len(header))
+    _backup(path)
+    path.write_text(text[:start] + (text[end + 1:] if end != -1 else ""))
+    return f"removed [mcp_servers.{SERVER_NAME}] table from {path}"
+
+
+def _remove_file(path: Path, label: str) -> str | None:
+    if not path.exists():
+        return None
+    path.unlink()
+    return f"removed {label} ({path})"
+
+
+def _remove_skill(host: str) -> str | None:
+    dir_fn = _SKILL_DIRS.get(host)
+    if dir_fn is None:
+        return None
+    dest = dir_fn() / SERVER_NAME / "SKILL.md"
+    if not dest.exists():
+        return None
+    dest.unlink()
+    try:
+        dest.parent.rmdir()  # only if empty — user files in there survive
+    except OSError:
+        pass
+    return f"removed usage skill {dest}"
+
+
+def _package_removal_cmd() -> str:
+    """The command that removes this installed copy. Printed, never run: a
+    live process cannot reliably delete itself (open files on Windows)."""
+    exe = os.path.realpath(sys.executable).replace("\\", "/")
+    if "/uv/tools/" in exe:
+        return "uv tool uninstall trailmem"
+    if "/pipx/" in exe:
+        return "pipx uninstall trailmem"
+    return f"{sys.executable} -m pip uninstall trailmem"
+
+
+def uninstall(purge: bool = False) -> int:
+    from .config import TRAILMEM_HOME
+    if not sys.stdin.isatty():
+        print("Refusing to modify configs without an interactive y/N confirmation.")
+        return 1
+    what = "every detected agent config"
+    if purge:
+        what += f" AND permanently delete the memory DB at {TRAILMEM_HOME}"
+    answer = input(f"Remove trailmem from {what}? [y/N] ")
+    if answer.strip().lower() not in ("y", "yes"):
+        print("No changes made.")
+        return 0
+
+    bad = sym("✗", "[X]")
+    removed = failures = 0
+    steps: list[tuple[str, object]] = [
+        ("Claude Code", _claude_remove),
+        ("Codex", _codex_remove_toml),
+    ]
+    for name, _detect, path, key, _entry in JSON_HOSTS:
+        steps.append((name, lambda path=path, key=key: _remove_json_map(path(), key)))
+    for name, fn in steps:
+        try:
+            msg = fn()
+        except Exception as exc:
+            failures += 1
+            print(f"  {name}: {bad} {exc}")
+            continue
+        if msg:
+            removed += 1
+            print(f"  {name}: {msg}")
+
+    extras = [(host, lambda host=host: _remove_skill(host)) for host in _SKILL_DIRS]
+    extras += [
+        ("Claude Code", lambda: _remove_file(
+            _HOME() / ".claude" / "commands" / "tm-save.md", "/tm-save command")),
+        ("Codex", lambda: _remove_file(
+            _HOME() / ".codex" / "prompts" / "trailmem-save.md", "/prompts:trailmem-save")),
+    ]
+    for name, fn in extras:
+        try:
+            msg = fn()
+            if msg:
+                print(f"  {name}: {msg}")
+        except Exception as exc:
+            failures += 1
+            print(f"  {name}: {bad} {exc}")
+
+    print(f"Removed trailmem from {removed} host config(s).")
+
+    if purge:
+        if TRAILMEM_HOME.exists():
+            print(f"--purge PERMANENTLY deletes every memory at {TRAILMEM_HOME}. "
+                  "This cannot be undone.")
+            if input("Type 'purge' to confirm: ").strip() != "purge":
+                print(f"Purge aborted — memories kept at {TRAILMEM_HOME}.")
+            else:
+                shutil.rmtree(TRAILMEM_HOME)
+                print(f"Deleted {TRAILMEM_HOME} (all memories erased).")
+        else:
+            print(f"Nothing to purge — {TRAILMEM_HOME} does not exist.")
+    else:
+        print(f"Memories KEPT at {TRAILMEM_HOME} — nothing was deleted there. "
+              "Reinstalling trailmem brings them all back automatically.")
+        print(f"To erase them too: `trailmem uninstall --purge` (or `rm -rf {TRAILMEM_HOME}`).")
+
+    print("To remove the package itself, run:")
+    print(f"  {_package_removal_cmd()}")
+    print("Restart the agent(s) so they drop the removed MCP server.")
     return 1 if failures else 0

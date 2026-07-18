@@ -354,6 +354,10 @@ def cmd_integrate(a) -> int:
     return integrate.run()
 
 
+def cmd_uninstall(a) -> int:
+    return integrate.uninstall(purge=a.purge)
+
+
 def cmd_update(a) -> int:
     """Check PyPI for a newer release and upgrade in place — no manual reinstall."""
     import subprocess
@@ -382,7 +386,7 @@ def cmd_update(a) -> int:
 
     # Pick the upgrade command from HOW this copy was installed. uv tool needs
     # install --force: a once-pinned tool makes bare `uv tool upgrade` a no-op.
-    exe = os.path.realpath(sys.executable)
+    exe = os.path.realpath(sys.executable).replace("\\", "/")
     if "/uv/tools/" in exe:
         cmdline = ["uv", "tool", "install", "trailmem@latest", "--force"]
     elif "/pipx/" in exe:
@@ -652,6 +656,11 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_setup)
     s = sub.add_parser("integrate", help="Register MCP with detected agents (asks first)")
     s.set_defaults(func=cmd_integrate)
+    s = sub.add_parser("uninstall",
+                       help="Remove trailmem from agent configs (memories kept unless --purge)")
+    s.add_argument("--purge", action="store_true",
+                   help="Also permanently delete ~/.trailmem (ALL memories — irreversible)")
+    s.set_defaults(func=cmd_uninstall)
     s = sub.add_parser("doctor", help="Health check")
     s.set_defaults(func=cmd_doctor)
     s = sub.add_parser("update", help="Upgrade to the latest PyPI release (in place)")
