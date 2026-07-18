@@ -24,7 +24,9 @@ def _conn():
 
 def _ctx(agent=None):
     agent = store_mod.resolve_agent(agent)
-    proj = store_mod.resolve_project(None)
+    # None means global scope here; keep the "global" sentinel so store()'s
+    # re-resolve doesn't fall back to cwd and silently project-scope it.
+    proj = store_mod.resolve_project(None) or "global"
     sid = store_mod.session_id_from_env()
     return agent, proj, sid
 

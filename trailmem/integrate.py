@@ -46,7 +46,10 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def _patch_json_map(path: Path, key: str, entry: dict) -> str:
-    """Add SERVER_NAME under `key` in a JSON config file, preserving the rest."""
+    """Add SERVER_NAME under `key` in a JSON config file, preserving the rest.
+    An existing entry missing the agent-attribution env map gets it added —
+    hosts spawn MCP servers with a clean env, so TRAILMEM_AGENT_TYPE in the
+    config entry is the only reliable attribution path."""
     if path.exists():
         try:
             data = json.loads(path.read_text())
@@ -60,8 +63,15 @@ def _patch_json_map(path: Path, key: str, entry: dict) -> str:
     else:
         data = {}
     servers = data.setdefault(key, {})
-    if SERVER_NAME in servers:
-        return "already registered"
+    existing = servers.get(SERVER_NAME)
+    if isinstance(existing, dict):
+        missing = [k for k in ("env", "environment") if k in entry and k not in existing]
+        if not missing:
+            return "already registered"
+        for k in missing:
+            existing[k] = entry[k]
+        _write_json(path, data)
+        return "added agent-attribution env"
     servers[SERVER_NAME] = entry
     _write_json(path, data)
     return f"wrote {path}"
@@ -74,13 +84,16 @@ def _claude_detect() -> bool:
 
 
 def _claude_integrate(cmd: str) -> str:
+    # Claude detects via its own CLAUDECODE env, but the explicit env pin keeps
+    # attribution correct even if a project-scope .mcp.json overrides this entry.
     already = subprocess.run(
         ["claude", "mcp", "get", SERVER_NAME], capture_output=True, timeout=15
     ).returncode == 0
     if already:
         return "already registered"
     result = subprocess.run(
-        ["claude", "mcp", "add", SERVER_NAME, "--scope", "user", "--", cmd],
+        ["claude", "mcp", "add", SERVER_NAME, "--scope", "user",
+         "-e", "TRAILMEM_AGENT_TYPE=claude", "--", cmd],
         capture_output=True, text=True, timeout=30,
     )
     if result.returncode != 0:
@@ -92,37 +105,78 @@ def _codex_detect() -> bool:
     return (Path.home() / ".codex").is_dir()
 
 
+def _codex_install_prompt() -> str:
+    """Codex has no MCP-prompt support; a custom prompt file gives it
+    /prompts:trailmem-save (format verified against Codex CLI 0.144)."""
+    from importlib import resources
+    dest = Path.home() / ".codex" / "prompts" / "trailmem-save.md"
+    body = resources.files("trailmem").joinpath("commands/tm-save.md").read_text()
+    if dest.exists() and dest.read_text() == body:
+        return "prompt already installed"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body)
+    return "installed /prompts:trailmem-save"
+
+
+_CODEX_ENV_LINE = 'env = { TRAILMEM_AGENT_TYPE = "codex" }'
+
+
 def _codex_integrate(cmd: str) -> str:
-    # Appending a new table is the only TOML edit the stdlib can do safely.
+    # Appending a new table (or one line inside ours) is the only TOML edit the
+    # stdlib can do safely. Codex spawns MCP servers with a clean env (verified
+    # live: no CODEX_THREAD_ID reaches the server), so the env pin is required.
     path = Path.home() / ".codex" / "config.toml"
     text = path.read_text() if path.exists() else ""
-    if f"[mcp_servers.{SERVER_NAME}]" in text:
-        return "already registered"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _backup(path)
-    entry = f'[mcp_servers.{SERVER_NAME}]\ncommand = "{cmd}"\nargs = []\n'
-    prefix = text if not text or text.endswith("\n") else text + "\n"
-    path.write_text(prefix + ("\n" if text else "") + entry)
-    return f"wrote {path}"
+    header = f"[mcp_servers.{SERVER_NAME}]"
+    if header in text:
+        start = text.index(header)
+        end = text.find("\n[", start + len(header))
+        block = text[start: end if end != -1 else len(text)]
+        if "TRAILMEM_AGENT_TYPE" in block:
+            reg = "already registered"
+        else:
+            _backup(path)
+            at = start + len(header)
+            path.write_text(text[:at] + "\n" + _CODEX_ENV_LINE + text[at:])
+            reg = "added agent-attribution env"
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _backup(path)
+        entry = f'{header}\ncommand = "{cmd}"\nargs = []\n{_CODEX_ENV_LINE}\n'
+        prefix = text if not text or text.endswith("\n") else text + "\n"
+        path.write_text(prefix + ("\n" if text else "") + entry)
+        reg = f"wrote {path}"
+    return f"{reg}; {_codex_install_prompt()}"
 
 
 # ---- hosts registered by patching a JSON config ----
 # name -> (detect, config path, map key, entry factory)
 
 _HOME = Path.home
-_STD = lambda cmd: {"command": cmd, "args": []}  # noqa: E731 - table readability
+
+# Every entry pins TRAILMEM_AGENT_TYPE: hosts spawn MCP servers with a clean
+# env (no session vars reach the server process — verified live for Codex and
+# Kilo), so the config-entry env map is the only reliable attribution path.
+# Env-key naming per host is schema-verified: Kilo + OpenCode use
+# "environment" (app.kilo.ai/config.json, opencode.ai/config.json
+# McpLocalConfig); the mcpServers-shaped hosts and Zed use "env".
+def _std(agent):
+    return lambda cmd: {"command": cmd, "args": [],
+                        "env": {"TRAILMEM_AGENT_TYPE": agent}}
+
 
 JSON_HOSTS = [
     ("Kiro",
      lambda: (_HOME() / ".kiro").is_dir(),
      lambda: _HOME() / ".kiro" / "settings" / "mcp.json",
-     "mcpServers", _STD),
+     "mcpServers", _std("kiro")),
     ("Kilo",
      lambda: (shutil.which("kilo") is not None
               or (_HOME() / ".kilo" / "bin" / "kilo").exists()
               or (_HOME() / ".config" / "kilo" / "kilo.jsonc").exists()),
      lambda: _HOME() / ".config" / "kilo" / "kilo.jsonc",
-     "mcp", lambda cmd: {"type": "local", "command": [cmd]}),
+     "mcp", lambda cmd: {"type": "local", "command": [cmd],
+                         "environment": {"TRAILMEM_AGENT_TYPE": "kilo"}}),
     ("OpenCode",
      lambda: (shutil.which("opencode") is not None
               or (_HOME() / ".config" / "opencode").is_dir()
@@ -131,26 +185,28 @@ JSON_HOSTS = [
               if (_HOME() / ".opencode.json").exists()
               and not (_HOME() / ".config" / "opencode" / "opencode.json").exists()
               else _HOME() / ".config" / "opencode" / "opencode.json"),
-     "mcp", lambda cmd: {"type": "local", "command": [cmd], "enabled": True}),
+     "mcp", lambda cmd: {"type": "local", "command": [cmd], "enabled": True,
+                         "environment": {"TRAILMEM_AGENT_TYPE": "opencode"}}),
     ("Antigravity",
      lambda: ((_HOME() / ".antigravity-ide").exists()
               or (_HOME() / ".gemini" / "antigravity-cli").exists()
               or (_HOME() / ".gemini" / "antigravity-ide").exists()),
      lambda: _HOME() / ".gemini" / "config" / "mcp_config.json",
-     "mcpServers", _STD),
+     "mcpServers", _std("antigravity")),
     ("Zed",
      lambda: (shutil.which("zed") is not None
               or (_HOME() / ".config" / "zed").is_dir()),
      lambda: _HOME() / ".config" / "zed" / "settings.json",
-     "context_servers", lambda cmd: {"source": "custom", "command": cmd, "args": []}),
+     "context_servers", lambda cmd: {"source": "custom", "command": cmd, "args": [],
+                                     "env": {"TRAILMEM_AGENT_TYPE": "zed"}}),
     ("Cursor",
      lambda: (_HOME() / ".cursor").is_dir(),
      lambda: _HOME() / ".cursor" / "mcp.json",
-     "mcpServers", _STD),
+     "mcpServers", _std("cursor")),
     ("Windsurf",
      lambda: (_HOME() / ".codeium" / "windsurf").is_dir(),
      lambda: _HOME() / ".codeium" / "windsurf" / "mcp_config.json",
-     "mcpServers", _STD),
+     "mcpServers", _std("windsurf")),
 ]
 
 

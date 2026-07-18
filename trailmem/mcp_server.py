@@ -26,10 +26,20 @@ def _db():
     return _conn
 
 
-def _session_ctx(agent_type=None, project=None):
-    """Resolve identity + lazily register the session (never sets last_welcome_at)."""
-    agent = store_mod.resolve_agent(agent_type)
+def _session_ctx(agent_type=None, project=None, required=True):
+    """Resolve identity + lazily register the session (never sets last_welcome_at).
+
+    required=False (read-style ops): an undetectable agent skips registration
+    instead of raising — the no-unattributed-memory rule guards STORED memories,
+    not reads, and hard-failing every tool made trailmem unusable on hosts
+    without a session env var (Kilo/Codex before env injection)."""
     proj = store_mod.resolve_project(project)
+    try:
+        agent = store_mod.resolve_agent(agent_type)
+    except ValidationError:
+        if required:
+            raise
+        return None, None, proj
     sid = store_mod.session_id_from_env() or f"pid-{os.getppid()}"
     sessions.register_session(_db(), sid, agent, proj)
     return sid, agent, proj
@@ -65,9 +75,12 @@ def trailmem_store(
     Duplicates are rejected/blocked with the existing #id — edit that instead."""
     sid, agent, proj = _session_ctx(agent_type, project)
     conn = _db()
+    # proj is None only for global scope; store() re-resolves, and a bare None
+    # would fall back to cwd — pass the "global" sentinel through instead.
     r = store_mod.store(
         conn, content, title, event_type, agent_type=agent, work_type=work_type,
-        project=proj, session_id=sid, source_uri=source_uri, modified_files=modified_files,
+        project="global" if proj is None else proj,
+        session_id=sid, source_uri=source_uri, modified_files=modified_files,
         pinned=pinned, link_to=link_to, edge_type=edge_type, force=force,
     )
     if r["outcome"] == "rejected_exact":
@@ -105,7 +118,7 @@ def trailmem_query(
 ) -> str:
     """Search memories (semantic + keyword). Returns #id, type, status, edge count [↔N]
     and a 200-char preview per hit. Use trailmem_show(ref) for full content + edges."""
-    _, _, proj = _session_ctx(project=project)
+    _, _, proj = _session_ctx(project=project, required=False)
     results = queries.query(
         _db(), text, type_filter=type_filter, agent_filter=agent_filter,
         project=proj, limit=limit, include_archived=include_archived,
@@ -117,7 +130,7 @@ def trailmem_query(
 def trailmem_show(ref: str) -> str:
     """Fetch one memory in full: content, all edges (with [eN] ids), supersede chain.
     The only tool that returns edges — edge ids here are what link remove needs."""
-    _session_ctx()
+    _session_ctx(required=False)
     data = queries.show(_db(), ref)
     if not data:
         raise ValidationError(f"ref '{ref}' not found")
@@ -139,7 +152,7 @@ def trailmem_edit(
     """Update a memory's content/title/type/pin, or archive it (status='archived'
     needs archive_reason >=20 chars AND at least one edge).
     Content edits refresh hash + embedding + search index automatically."""
-    _session_ctx()
+    _session_ctx(required=False)
     r = ops.edit(
         _db(), ref, content=content, title=title, event_type=event_type,
         pinned=pinned, status=status, archive_reason=archive_reason,
@@ -164,7 +177,7 @@ def trailmem_link(
     """Create (action='add': source, target, edge_type) or remove (action='remove':
     edge_id from trailmem_show) a typed edge between memories.
     Types: related / derived_from / supersedes / contradicts / evolves."""
-    _session_ctx()
+    _session_ctx(required=False)
     conn = _db()
     if action == "add":
         if not (source and target and edge_type):

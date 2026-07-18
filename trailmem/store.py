@@ -19,7 +19,8 @@ EVENT_TYPES = {
     "memory", "user_preference", "constraint", "session_summary",
 }
 WORK_TYPES = {"discussion", "file-edit", "code-written", "bug-fix", "research", "setup", "review"}
-AGENT_TYPES = {"kiro", "claude", "codex", "opencode", "kilo", "antigravity", "user"}
+AGENT_TYPES = {"kiro", "claude", "codex", "opencode", "kilo", "antigravity",
+               "zed", "cursor", "windsurf", "user"}
 EDGE_TYPES = {"related", "derived_from", "supersedes", "contradicts", "evolves"}
 
 _STOPWORDS = {"the", "is", "of", "and", "to", "a", "in", "for", "on", "with", "it", "this", "that"}
@@ -49,23 +50,28 @@ def fmt_local(ts: str | None, *, date_only: bool = False) -> str:
 
 
 def detect_agent(env=os.environ) -> str | None:
+    # Claude check is LAST: Claude-fork hosts (Antigravity) mimic CLAUDE_* vars,
+    # so a host-specific var must win over the widely-copied Claude ones.
     if env.get("TRAILMEM_AGENT_TYPE"):
         return env["TRAILMEM_AGENT_TYPE"]
-    if env.get("CLAUDE_CODE_SESSION_ID") or env.get("CLAUDECODE"):
-        return "claude"
     if env.get("KIRO_SESSION_ID"):
         return "kiro"
     if env.get("ANTIGRAVITY_CONVERSATION_ID"):
         return "antigravity"
     if env.get("CODEX_THREAD_ID"):
         return "codex"
+    if env.get("KILO_RUN_ID") or env.get("KILO") or env.get("KILOCODE_VERSION"):
+        return "kilo"
+    if env.get("CLAUDE_CODE_SESSION_ID") or env.get("CLAUDECODE"):
+        return "claude"
     return None
 
 
-# Host session-id env vars, in priority order. One list so every call site
+# Host session-id env vars, in priority order (host-specific before Claude —
+# Claude-fork hosts mimic CLAUDE_* vars). One list so every call site
 # (MCP server, CLI, statusline, store) reads the same set — no drift.
-_SESSION_ENV = ("CLAUDE_CODE_SESSION_ID", "KIRO_SESSION_ID",
-                "ANTIGRAVITY_CONVERSATION_ID", "CODEX_THREAD_ID")
+_SESSION_ENV = ("KIRO_SESSION_ID", "ANTIGRAVITY_CONVERSATION_ID",
+                "CODEX_THREAD_ID", "KILO_RUN_ID", "CLAUDE_CODE_SESSION_ID")
 
 
 def session_id_from_env(env=os.environ) -> str | None:
