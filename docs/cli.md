@@ -152,7 +152,9 @@ trailmem update
 # was installed (uv tool → `uv tool install trailmem@latest --force` — a once-pinned
 # tool makes bare `uv tool upgrade` a no-op; pipx → `pipx upgrade`; else pip -U).
 # Editable/dev installs are refused (update via git). After upgrading it reminds
-# the user to restart agents — schema migrations run on first new-code start and
+# the user to run `trailmem integrate` (refreshes host configs — old entries are
+# upgraded in place when the launch shape changed, e.g. pre-0.1.7 trailmem-mcp)
+# and then restart agents — schema migrations run on first new-code start and
 # old servers must not keep writing.
 ```
 
