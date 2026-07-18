@@ -30,6 +30,7 @@ PRAGMA busy_timeout = 3000;  -- wait up to 3s on write contention (WAL handles r
 - SQLite WAL mode — multiple readers + one writer at a time
 - `busy_timeout=3000` — prevents instant SQLITE_BUSY errors on contention
 - `BEGIN IMMEDIATE` — on read-modify-write operations (welcome anti-bloat, dup-check+insert)
+- `_tx_safe` decorator wraps every tool: any tool exception rolls back the shared connection. SQLite opens an implicit transaction on a write, and the MCP connection is long-lived — a failed write (e.g. a stale server hitting a post-migration schema) would otherwise leave that transaction open and write-lock the DB for *every* process until the server dies. Rollback-on-failure contains the blast radius to the one failed call.
 - No extra file-locks, queues, or coordinators needed
 - Two agents, one machine, human-speed writes — WAL handles this natively
 
@@ -82,7 +83,8 @@ Save new memory with optional linking + supersede in one call.
 | project | string | No | auto from cwd | NULL = global. If supplied, must be an absolute path or `"global"`; a bare name is rejected. |
 | work_type | string | No | null | discussion/file-edit/code-written/bug-fix/research/setup/review |
 | source_uri | string | No | null | Origin reference |
-| modified_files | string | No | null | Comma-separated paths |
+| code_files | string | No | null | Comma-separated source/config file paths |
+| doc_files | string | No | null | Comma-separated docs/spec page paths |
 | pinned | boolean | No | false | Pin this memory |
 | link_to | string/array | No | null | ref(s) to link to (#id or node_id) |
 | edge_type | string | No | "related" | related/derived_from/supersedes/contradicts/evolves |
@@ -290,6 +292,9 @@ errors per Cross-Tool Error Handling — not plain-text responses.)
 **Rule:** Every business-outcome text MUST include next-action instruction. Agent should never be stuck after a rejection.
 
 **Why not protocol-error for dup/block:** Some MCP clients auto-retry on protocol errors. Dup-reject → retry = infinite loop. Business outcomes are information, not failure.
+
+### Server instructions
+The server declares an `instructions` string (`mcp_server._INSTRUCTIONS`) at initialize, which prompt-aware clients inject into agent context. It nudges the agent to call `trailmem_welcome` at session start **only if a briefing is not already present** (so hook-equipped hosts don't double-inject), to store durable memory before exit, and states the key parameter defaults (omit `project` → cwd, omit `agent_type` → auto). This is the once-per-session welcome trigger for hosts without a session-start hook. Deeper tool semantics live in the bundled `trailmem` usage skill that `integrate` installs into per-host skill dirs — see [[hooks]].
 
 ### Hook Integration
 Beyond the 6 tools, the server exposes one MCP **prompt**, `save_session` (title “Save this session to memory”): a portable, zero-config way for any prompt-aware client (Claude Code, Cursor, VS Code, Windsurf) to have the live agent extract the session's decisions/lessons/tasks and call `trailmem_store`. It carries no side effects itself — it just returns the capture instruction. See [[hooks]] “Save-awareness” for the full trigger/reminder model. Session lifecycle hooks are documented separately in [[hooks]].

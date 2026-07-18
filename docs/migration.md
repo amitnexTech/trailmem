@@ -1,5 +1,7 @@
 # trailmem — Seed Playbook (Omega → trailmem One-Time Transfer)
 
+> **Not the SQL schema-migration doc.** This page is the one-time *data* seed from Omega. For DB schema migrations (the `MIGRATIONS` list, `PRAGMA user_version`, `ALTER TABLE` on upgrade), see [[schema]] → “Migrations”.
+
 ## Approach
 
 **No shipped `--from-omega` importer.** Migration is a one-time manual seed through normal `trailmem store` path. This ensures:

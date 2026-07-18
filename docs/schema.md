@@ -4,7 +4,7 @@
 
 trailmem uses SQLite with 5 core tables: `memories` (core), `edges` (relationships), `memories_vec` (embeddings), `memories_fts` (full-text search), `sessions` (boundary tracking) — plus 2 dashboard support tables (`dashboard_state`, `dashboard_events`) populated by triggers for the [[dashboard]] SSE feed.
 
-**Migrations:** `init_db` is idempotent (`CREATE ... IF NOT EXISTS`), so NEW tables/indexes/triggers self-heal on old DBs. Changes to EXISTING tables (e.g. `ALTER TABLE ... ADD COLUMN`) go in the append-only `MIGRATIONS` list in `schema.py`, tracked via `PRAGMA user_version` — each entry runs exactly once, in order, on every install. Never edit or reorder shipped entries.
+**Migrations:** `init_db` is idempotent (`CREATE ... IF NOT EXISTS`), so NEW tables/indexes/triggers self-heal on old DBs. Changes to EXISTING tables (e.g. `ALTER TABLE ... ADD COLUMN`) go in the append-only `MIGRATIONS` list in `schema.py`, tracked via `PRAGMA user_version` — each entry runs exactly once, in order, on any DB that predates it. A FRESH DB is created at the current schema, so `init_db` pre-marks `user_version = len(MIGRATIONS)` on first create (else a migration would `ALTER` a column that already exists). Never edit or reorder shipped entries.
 
 ## Connection Setup
 
@@ -29,7 +29,8 @@ CREATE TABLE memories (
     project TEXT,
     session_id TEXT,
     source_uri TEXT,
-    modified_files TEXT,
+    code_files TEXT,
+    doc_files TEXT,
     pinned INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT,
@@ -55,7 +56,8 @@ CREATE TABLE memories (
 | project | Absolute path or NULL | System auto-fill from cwd, NULL=global | Scope isolation. An explicit project (param/`TRAILMEM_PROJECT`) must be an **absolute path** or the literal `"global"` — a bare name (e.g. `jarvis_build`) is **rejected**, since it silently splits a project's memories from its cwd-derived absolute-path form. Omit to auto-fill from cwd. |
 | session_id | Free text, nullable | System auto-fill from env var | Groups work within one session. |
 | source_uri | Free text, nullable | Agent optional | Origin: file path, session ref, URL. |
-| modified_files | Comma-separated paths, nullable | Agent optional | Files touched in this work. |
+| code_files | Comma-separated paths, nullable | Agent optional | Source/config files touched in this work. |
+| doc_files | Comma-separated paths, nullable | Agent optional | Docs/spec pages touched in this work. Split from a single `modified_files` field (migration 1) — two named fields prompt agents to record BOTH kinds; the generic field got only doc paths in practice. |
 | pinned | 0 or 1 | Agent sets | 1 = always in welcome, never buried. |
 | created_at | ISO 8601 timestamp | System | Immutable after creation. Stored in **UTC** (`datetime.now(UTC)`); human-facing surfaces (CLI, welcome, dashboard) render it in the **system local timezone** via `store.fmt_local()` so a memory made near UTC midnight is not shown on the wrong day. |
 | updated_at | ISO 8601 timestamp, nullable | System (on edit) | Set when content/title changes. |
@@ -94,7 +96,7 @@ Orthogonal to event_type. event_type = what kind of knowledge. work_type = what 
 ### agent_type Enum
 
 ```
-kiro, claude, codex, opencode, kilo, antigravity, user
+kiro, claude, codex, opencode, kilo, antigravity, zed, cursor, windsurf, user
 ```
 
 `user` = manual CLI/dashboard entry by human.

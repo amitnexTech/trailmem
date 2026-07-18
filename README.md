@@ -48,7 +48,7 @@ trailmem doctor         # health check
 trailmem integrate      # detects installed agent hosts, asks before writing any config
 ```
 
-`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead). On Claude Code it also installs a `/tm-save` slash command.
+`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead). On Claude Code it also installs a `/tm-save` slash command. On hosts that read Agent Skills (Claude Code, Codex, Kilo, OpenCode) it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source.
 
 ### Saving a session before you exit
 
@@ -118,12 +118,20 @@ Then restart the agent and check the wiring: the agent should see six `trailmem_
 ### Updating
 
 ```bash
-uv tool upgrade trailmem       # if installed with uv
-pipx upgrade trailmem          # if installed with pipx
-pip install --upgrade trailmem # if installed with pip (inside the venv)
+trailmem update   # checks PyPI, upgrades in place using however you installed it
 ```
 
-There is no in-app "update available" notice — trailmem sends no telemetry, by design. Watch the GitHub Releases page instead.
+`trailmem update` detects whether this copy was installed with uv / pipx / pip and runs the right upgrade command (uv-tool installs need `uv tool install trailmem@latest --force` — a bare `uv tool upgrade` is a no-op on a pinned tool, which `trailmem update` handles for you). Editable/dev installs are refused (upgrade via git). After upgrading, **restart your agents** so their MCP servers reload — a schema migration runs on first start of the new code, and a still-running old server must not keep writing.
+
+Prefer to do it by hand:
+
+```bash
+uv tool install trailmem@latest --force   # if installed with uv
+pipx upgrade trailmem                      # if installed with pipx
+pip install --upgrade trailmem             # if installed with pip (inside the venv)
+```
+
+There is no in-app "update available" notice — trailmem sends no telemetry, by design. `trailmem update` only checks PyPI when you run it.
 
 The agent then gets six tools: `trailmem_welcome` (once-per-session briefing), `trailmem_store`, `trailmem_query`, `trailmem_show`, `trailmem_edit`, `trailmem_link`. Everything is also available to humans via the `trailmem` CLI (`store`, `query`, `show`, `list`, `stats`, `link`, `archive`, ...).
 

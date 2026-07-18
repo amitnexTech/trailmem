@@ -210,6 +210,31 @@ JSON_HOSTS = [
 ]
 
 
+# Hosts that read Agent Skills (SKILL.md) from a user-level directory. The
+# skill is lazy-loaded (only name+description sit in context), so it teaches
+# tool semantics without the agent reading trailmem's source or schema.
+_SKILL_DIRS = {
+    "Claude Code": lambda: _HOME() / ".claude" / "skills",
+    "Codex": lambda: _HOME() / ".codex" / "skills",
+    "Kilo": lambda: _HOME() / ".config" / "kilo" / "skills",
+    "OpenCode": lambda: _HOME() / ".config" / "opencode" / "skills",
+}
+
+
+def _install_skill(host: str) -> str | None:
+    dir_fn = _SKILL_DIRS.get(host)
+    if dir_fn is None:
+        return None
+    from importlib import resources
+    body = resources.files("trailmem").joinpath("skill/SKILL.md").read_text()
+    dest = dir_fn() / SERVER_NAME / "SKILL.md"
+    if dest.exists() and dest.read_text() == body:
+        return "usage skill already installed"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body)
+    return f"usage skill installed at {dest}"
+
+
 def _install_claude_command() -> str:
     """Copy the bundled /tm-save slash command into ~/.claude/commands/.
     Claude Code reads *.md command files from there; other hosts ignore it."""
@@ -267,6 +292,12 @@ def run() -> int:
         except Exception as exc:
             failures += 1
             print(f"  {name}: ✗ {exc}")
+        try:
+            skill = _install_skill(name)
+            if skill:
+                print(f"  {name}: {skill}")
+        except Exception as exc:
+            print(f"  {name}: usage skill ✗ {exc}")
     if any(name == "Claude Code" for name, _ in found):
         try:
             print(f"  Claude Code /tm-save command: {_install_claude_command()}")

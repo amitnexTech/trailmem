@@ -26,7 +26,7 @@ trailmem store "content here" \
     --work-type code-written \
     --source "file:docs/apps/jarvis-play.md"
 # Also: --supersedes <ref> --archive-reason "why (min 20 chars)" for one-call supersede,
-#       --modified-files "a.py,b.py", --force to bypass the >0.92 near-dup block (exit 4)
+#       --code-files "a.py,b.py" --doc-files "docs/x.md", --force to bypass the >0.92 near-dup block (exit 4)
 
 # Edit existing memory
 trailmem edit <ref> --content "updated content"
@@ -135,13 +135,18 @@ trailmem integrate
 # TRAILMEM_AGENT_TYPE in the entry's env for attribution.
 # README has the generic guide ("Any other MCP agent") with the common JSON shape + `which trailmem-mcp` for the absolute path.
 
-# Update to a newer release
-uv tool upgrade trailmem   # (or: pipx upgrade trailmem / pip install --upgrade trailmem inside a venv)
-# No in-app "update available" notice (no telemetry, by design). Track GitHub Releases.
-
 # Health check
 trailmem doctor
 # Verifies: home + config presence, DB tables, sqlite-vec extension, embedding model
+
+# Self-update (no manual reinstall)
+trailmem update
+# Checks PyPI for a newer release; picks the upgrade command from HOW this copy
+# was installed (uv tool → `uv tool install trailmem@latest --force` — a once-pinned
+# tool makes bare `uv tool upgrade` a no-op; pipx → `pipx upgrade`; else pip -U).
+# Editable/dev installs are refused (update via git). After upgrading it reminds
+# the user to restart agents — schema migrations run on first new-code start and
+# old servers must not keep writing.
 ```
 
 ### MODEL Management (embedding model is user-configurable)

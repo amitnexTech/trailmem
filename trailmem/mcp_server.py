@@ -6,7 +6,9 @@ auto-retry protocol errors, and a dup-reject retry loops forever).
 Invalid params / unknown refs ARE protocol errors (ValidationError raised).
 """
 
+import functools
 import os
+import sqlite3
 
 from mcp.server.fastmcp import FastMCP
 
@@ -14,7 +16,19 @@ from . import ops, queries, sessions, store as store_mod
 from .schema import connect, init_db
 from .store import ValidationError
 
-mcp = FastMCP("trailmem")
+# Self-guarding: hook-equipped hosts inject the briefing before the agent runs,
+# so the instruction must not trigger a second (duplicate) welcome there.
+_INSTRUCTIONS = (
+    "trailmem is persistent cross-session memory. At session start, IF a trailmem "
+    "briefing (pinned rules / recent activity) is not already in your context, call "
+    "trailmem_welcome once — never twice. Before the session ends, store its durable "
+    "decisions/lessons/tasks with trailmem_store (English content). Parameter rules: "
+    "omit `project` to auto-scope to the current working directory, pass 'global' for "
+    "cross-project memories; omit `agent_type` (auto-detected). If a call fails or "
+    "usage is unclear, consult the 'trailmem' skill if installed."
+)
+
+mcp = FastMCP("trailmem", instructions=_INSTRUCTIONS)
 _conn = None
 
 
@@ -24,6 +38,25 @@ def _db():
         _conn = connect()
         init_db(_conn)
     return _conn
+
+
+def _tx_safe(fn):
+    """Roll back the shared connection on any tool failure. A failed write
+    otherwise leaves the implicit transaction open on this long-lived
+    connection, write-locking the DB for EVERY process (observed live:
+    schema-mismatch INSERT from a stale server locked prod for all agents)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            if _conn is not None:
+                try:
+                    _conn.rollback()
+                except sqlite3.Error:
+                    pass
+            raise
+    return wrapper
 
 
 def _session_ctx(agent_type=None, project=None, required=True):
@@ -46,6 +79,7 @@ def _session_ctx(agent_type=None, project=None, required=True):
 
 
 @mcp.tool()
+@_tx_safe
 def trailmem_welcome(project: str = None, agent_type: str = None, force: bool = False) -> str:
     """Session-start briefing: pinned rules, recent activity, open tasks, stats.
     Call once at session start; repeat calls return the short form unless force=true."""
@@ -54,6 +88,7 @@ def trailmem_welcome(project: str = None, agent_type: str = None, force: bool = 
 
 
 @mcp.tool()
+@_tx_safe
 def trailmem_store(
     title: str,
     content: str,
@@ -62,7 +97,8 @@ def trailmem_store(
     project: str = None,
     work_type: str = None,
     source_uri: str = None,
-    modified_files: str = None,
+    code_files: str = None,
+    doc_files: str = None,
     pinned: bool = False,
     link_to: str = None,
     edge_type: str = "related",
@@ -72,6 +108,8 @@ def trailmem_store(
 ) -> str:
     """Save a new memory (decision/lesson/task/constraint/...) with optional linking.
     Store the ENGLISH version of the content; title 3-60 chars, content 50+ chars.
+    Record BOTH file kinds when relevant: code_files = source/config files this
+    memory touches, doc_files = docs/spec pages (comma-separated paths).
     Duplicates are rejected/blocked with the existing #id — edit that instead."""
     sid, agent, proj = _session_ctx(agent_type, project)
     conn = _db()
@@ -80,7 +118,7 @@ def trailmem_store(
     r = store_mod.store(
         conn, content, title, event_type, agent_type=agent, work_type=work_type,
         project="global" if proj is None else proj,
-        session_id=sid, source_uri=source_uri, modified_files=modified_files,
+        session_id=sid, source_uri=source_uri, code_files=code_files, doc_files=doc_files,
         pinned=pinned, link_to=link_to, edge_type=edge_type, force=force,
     )
     if r["outcome"] == "rejected_exact":
@@ -108,6 +146,7 @@ def trailmem_store(
 
 
 @mcp.tool()
+@_tx_safe
 def trailmem_query(
     text: str,
     type_filter: str = None,
@@ -127,6 +166,7 @@ def trailmem_query(
 
 
 @mcp.tool()
+@_tx_safe
 def trailmem_show(ref: str) -> str:
     """Fetch one memory in full: content, all edges (with [eN] ids), supersede chain.
     The only tool that returns edges — edge ids here are what link remove needs."""
@@ -138,6 +178,7 @@ def trailmem_show(ref: str) -> str:
 
 
 @mcp.tool()
+@_tx_safe
 def trailmem_edit(
     ref: str,
     content: str = None,
@@ -166,6 +207,7 @@ def trailmem_edit(
 
 
 @mcp.tool()
+@_tx_safe
 def trailmem_link(
     action: str,
     source: str = None,

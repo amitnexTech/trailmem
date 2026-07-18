@@ -53,6 +53,13 @@ Rules for both:
 
 Other hosts (Kiro/Codex/OpenCode) register the same two commands in their own hook config with their agent name. Hosts with no hook system: agent calls `trailmem_welcome` manually per its steering rules — lazy fallback covers registration either way.
 
+### Non-hook hosts — two portable surfaces (one per host, never both)
+
+- **MCP `instructions` field.** The server declares a self-guarding instruction at initialize (`mcp_server._INSTRUCTIONS`): *if a briefing is not already in context, call `trailmem_welcome` once — never twice*. Hook-equipped hosts already have the briefing injected, so the conditional prevents a duplicate call (a second call would re-emit the full pinned section via the short form). Clients that honor `instructions` get the welcome nudge with zero per-host config.
+- **Usage skill (`SKILL.md`).** `trailmem integrate` installs a lazy-loaded Agent Skill into each detected host's user-level skills dir (Claude `~/.claude/skills/`, Codex `~/.codex/skills/`, Kilo `~/.config/kilo/skills/`, OpenCode `~/.config/opencode/skills/`). Only its name+description (~40 tokens) sit in context; the body loads on demand and teaches tool semantics — omit `project` (cwd auto-fill), omit `agent_type` (env pin), event_type choice, dedup-is-not-an-error, linking, archive rules — so an agent never reads trailmem's source/schema to figure out a call. The skill covers usage depth, NOT the welcome trigger (probabilistic loading makes it unfit for that).
+
+**Redundancy rule:** per host exactly ONE auto-welcome surface — hook where the host has one, the MCP `instructions` conditional everywhere else. Welcome text must enter context once per session, never twice.
+
 ## session-stop
 
 1. `UPDATE sessions SET last_seen_at = now() WHERE session_id = ?`. Nothing else.

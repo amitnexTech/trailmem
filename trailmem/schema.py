@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS memories (
     project TEXT,
     session_id TEXT,
     source_uri TEXT,
-    modified_files TEXT,
+    code_files TEXT,
+    doc_files TEXT,
     pinned INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT,
@@ -212,7 +213,13 @@ def has_vec(conn: sqlite3.Connection) -> bool:
 # (e.g. ALTER TABLE ... ADD COLUMN). Each entry runs at most once, in order,
 # tracked via PRAGMA user_version. Append only — never edit or reorder shipped
 # entries. Example: "ALTER TABLE memories ADD COLUMN foo TEXT".
-MIGRATIONS: list[str] = []
+MIGRATIONS: list[str] = [
+    # 1: split modified_files into code_files + doc_files. Two named fields
+    # prompt agents to record BOTH source and doc edits (a single generic
+    # field got only doc paths in practice). Existing data lands in code_files.
+    "ALTER TABLE memories RENAME COLUMN modified_files TO code_files;\n"
+    "ALTER TABLE memories ADD COLUMN doc_files TEXT;",
+]
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -226,7 +233,14 @@ def migrate(conn: sqlite3.Connection) -> None:
 def init_db(conn: sqlite3.Connection) -> None:
     """Create all tables + indexes. Idempotent."""
     cfg = load_config()
+    # A fresh DB is created at the CURRENT schema — mark all migrations as
+    # applied, or migrate() would re-run ALTERs against already-new columns.
+    fresh = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories'"
+    ).fetchone() is None
     conn.execute(MEMORIES)
+    if fresh:
+        conn.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
     conn.execute(EDGES)
     conn.execute(SESSIONS)
     conn.execute(FTS)

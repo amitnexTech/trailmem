@@ -38,7 +38,8 @@ def cmd_store(a) -> int:
     agent, proj, sid = _ctx(a.agent)
     r = store_mod.store(
         conn, a.content, a.title, a.type, agent_type=agent, work_type=a.work_type,
-        project=proj, session_id=sid, source_uri=a.source, modified_files=a.modified_files,
+        project=proj, session_id=sid, source_uri=a.source,
+        code_files=a.code_files, doc_files=a.doc_files,
         pinned=a.pin, link_to=a.link_to, edge_type=a.edge_type, force=a.force,
     )
     if r["outcome"] == "rejected_exact":
@@ -351,6 +352,50 @@ def cmd_integrate(a) -> int:
     return integrate.run()
 
 
+def cmd_update(a) -> int:
+    """Check PyPI for a newer release and upgrade in place — no manual reinstall."""
+    import subprocess
+    from importlib import metadata
+    from urllib.request import urlopen
+
+    try:
+        dist = metadata.distribution("trailmem")
+        direct = dist.read_text("direct_url.json") or ""
+    except metadata.PackageNotFoundError:
+        direct = ""
+    if '"editable": true' in direct or '"editable":true' in direct:
+        print("Development (editable) install — update via git, not PyPI.")
+        return 0
+
+    try:
+        with urlopen("https://pypi.org/pypi/trailmem/json", timeout=10) as r:
+            latest = json.load(r)["info"]["version"]
+    except Exception as exc:
+        print(f"Could not reach PyPI: {exc}")
+        return 1
+    if latest == __version__:
+        print(f"Already up to date ({__version__}).")
+        return 0
+    print(f"Update available: {__version__} → {latest}")
+
+    # Pick the upgrade command from HOW this copy was installed. uv tool needs
+    # install --force: a once-pinned tool makes bare `uv tool upgrade` a no-op.
+    exe = os.path.realpath(sys.executable)
+    if "/uv/tools/" in exe:
+        cmdline = ["uv", "tool", "install", "trailmem@latest", "--force"]
+    elif "/pipx/" in exe:
+        cmdline = ["pipx", "upgrade", "trailmem"]
+    else:
+        cmdline = [sys.executable, "-m", "pip", "install", "--upgrade", "trailmem"]
+    print("Running:", " ".join(cmdline))
+    if subprocess.run(cmdline).returncode != 0:
+        print("✗ upgrade failed — run the command above manually.")
+        return 1
+    print(f"✓ Updated to {latest}. Restart your agents so MCP servers pick it up "
+          "(a schema migration runs on first start; old servers must not keep writing).")
+    return 0
+
+
 def cmd_doctor(a) -> int:
     ok = True
     cfg = load_config()
@@ -493,7 +538,10 @@ def main(argv=None) -> int:
     s.add_argument("--agent")
     s.add_argument("--work-type")
     s.add_argument("--source")
-    s.add_argument("--modified-files")
+    s.add_argument("--code-files", help="Source/config files this memory touches (comma-separated)")
+    s.add_argument("--doc-files", help="Docs/spec pages this memory touches (comma-separated)")
+    # Deprecated pre-0.1.7 spelling; feeds code_files.
+    s.add_argument("--modified-files", dest="code_files", help=argparse.SUPPRESS)
     s.add_argument("--pin", action="store_true")
     s.add_argument("--link-to")
     s.add_argument("--edge-type", default="related")
@@ -599,6 +647,8 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_integrate)
     s = sub.add_parser("doctor", help="Health check")
     s.set_defaults(func=cmd_doctor)
+    s = sub.add_parser("update", help="Upgrade to the latest PyPI release (in place)")
+    s.set_defaults(func=cmd_update)
 
     s = sub.add_parser("model", help="Embedding model management")
     ms = s.add_subparsers(dest="model_cmd", required=True)

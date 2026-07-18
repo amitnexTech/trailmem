@@ -175,7 +175,8 @@ def store(
     project: str | None = None,
     session_id: str | None = None,
     source_uri: str | None = None,
-    modified_files: str | None = None,
+    code_files: str | None = None,
+    doc_files: str | None = None,
     pinned: bool = False,
     link_to: str | None = None,
     edge_type: str | None = None,
@@ -227,10 +228,10 @@ def store(
         pinned = True  # constraints are always pinned
     cur = conn.execute(
         "INSERT INTO memories (node_id, title, content, event_type, work_type, agent_type, "
-        "project, session_id, source_uri, modified_files, pinned, created_at, content_hash) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "project, session_id, source_uri, code_files, doc_files, pinned, created_at, content_hash) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (node_id, title, content, event_type, work_type, agent, project, session_id,
-         source_uri, modified_files, int(pinned), ts, content_hash),
+         source_uri, code_files, doc_files, int(pinned), ts, content_hash),
     )
     mem_id = cur.lastrowid
     conn.execute(
