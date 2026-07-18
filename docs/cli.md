@@ -123,7 +123,12 @@ trailmem integrate
 # Antigravity / Zed / Cursor / Windsurf
 # via their MCP config files) and, ONLY after an explicit y/N prompt, writes each host's
 # own MCP config. Per-host config differs: Claude Code uses `claude mcp add`; others get
-# their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem -- trailmem-mcp`.)
+# their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem
+# -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server`.)
+# Server launch is ALWAYS `<python> -u -m trailmem.mcp_server` — the generated
+# `trailmem-mcp` script was removed in 0.1.7: Windows Smart App Control blocks unsigned
+# per-install launcher .exes, silently killing host-spawned servers. integrate upgrades
+# old trailmem-mcp entries to the python -m shape in place (env pins preserved).
 # EVERY entry pins TRAILMEM_AGENT_TYPE=<host> in the entry's env map — hosts spawn MCP
 # servers with a clean env (no session vars reach the server process; verified live for
 # Codex and Kilo), so config-entry env is the only reliable attribution path. Env-key name
@@ -131,9 +136,11 @@ trailmem integrate
 # `env` (Codex: TOML inline table; Claude Code: `claude mcp add -e`). Re-running integrate
 # UPGRADES an existing entry that lacks the env map instead of skipping it. Codex also gets
 # ~/.codex/prompts/trailmem-save.md → /prompts:trailmem-save (no MCP-prompt support there).
-# ANY other MCP agent works manually: stdio transport, command `trailmem-mcp`, and set
-# TRAILMEM_AGENT_TYPE in the entry's env for attribution.
-# README has the generic guide ("Any other MCP agent") with the common JSON shape + `which trailmem-mcp` for the absolute path.
+# ANY other MCP agent works manually: stdio transport, command `<python> -u -m
+# trailmem.mcp_server`, and set TRAILMEM_AGENT_TYPE in the entry's env for attribution.
+# README has the generic guide ("Any other MCP agent") with the common JSON shape;
+# the right <python> is printed by `python -c "import sys; print(sys.executable)"` from
+# the environment trailmem is installed into.
 
 # Health check
 trailmem doctor

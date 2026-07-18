@@ -15,6 +15,11 @@
 
 HTTP deferred to future (team use case). Adding later is backward-compatible.
 
+### Launch shape (0.1.7+)
+**`<python> -u -m trailmem.mcp_server`** — never a generated launcher executable. Windows Smart App Control blocks unsigned per-install `.exe`s (Event Viewer CodeIntegrity 3077), silently killing a host-spawned server; `python -m` needs no launcher. `-u` keeps stdio unbuffered for MCP framing. The `trailmem-mcp` [project.scripts] entry was removed; `trailmem integrate` writes (and upgrades old entries to) this shape, always preserving the `TRAILMEM_AGENT_TYPE` env pin. `mcp_server.main()` calls `console.configure()` first (UTF-8 stdout/stderr, errors=replace) so cp1252 consoles never crash the protocol stream.
+
+**Degrade path:** a broken onnxruntime (Windows DLL init, WinError 1114) no longer kills store/query — `embeddings.embed()` guards the import/session init, warns once on stderr, and returns None (FTS-only). All `memories_vec` access is additionally gated on `has_vec(conn)` (sqlite-vec extension can fail to load → table absent).
+
 ### Lifecycle
 **On-demand spawn.** MCP host (Claude Code/Kiro/Codex) starts the process, communicates, kills on session end. No background daemon, no keep-alive.
 

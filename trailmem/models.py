@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 
 from .config import MODELS_DIR, load_config, save_config
+from .console import sym
 
 # sha256 values are trust-on-first-use: recorded into config on install and
 # verified against the registry when present.
@@ -148,7 +149,7 @@ def use(name: str) -> int:
     save_config(cfg)
     print(f"active model: {name} ({dims}d, bands {warn}/{block})")
     if dims != old_dims:
-        print(f"⚠ dimensions changed {old_dims} → {dims}: run `trailmem reindex` "
+        print(f"{sym('⚠', '[!]')} dimensions changed {old_dims} → {dims}: run `trailmem reindex` "
               "(semantic search is stale until then)")
     else:
         print("run `trailmem reindex` to re-embed existing memories with the new model")
@@ -160,7 +161,7 @@ def disable() -> int:
     cfg["embedding"]["enabled"] = False
     save_config(cfg)
     print("embeddings DISABLED → FTS5-only mode.")
-    print("⚠ WARNING: semantic search OFF + near-duplicate detection OFF (exact-hash only).")
+    print(f"{sym('⚠', '[!]')} WARNING: semantic search OFF + near-duplicate detection OFF (exact-hash only).")
     return 0
 
 
@@ -180,6 +181,11 @@ def reindex(conn: sqlite3.Connection) -> int:
     if not embeddings.available():
         print(f"model '{cfg['model']}' not installed — run: trailmem model install {cfg['model']}",
               file=sys.stderr)
+        return 1
+    # Probe BEFORE dropping the table — a broken onnxruntime (embed → None)
+    # must not leave the vec index destroyed and half-rebuilt.
+    if embeddings.embed("reindex runtime probe") is None:
+        print("embedding runtime unavailable — cannot reindex", file=sys.stderr)
         return 1
 
     conn.execute("DROP TABLE IF EXISTS memories_vec")

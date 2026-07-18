@@ -9,9 +9,10 @@ import json
 import os
 import sys
 
-from . import __version__, dashboard, embeddings, integrate, models, ops, queries, sessions
+from . import __version__, console, dashboard, embeddings, integrate, models, ops, queries, sessions
 from . import store as store_mod
 from .config import CONFIG_PATH, TRAILMEM_HOME, db_path, load_config, save_config
+from .console import sym
 from .schema import connect, has_vec, init_db
 from .store import ValidationError
 
@@ -59,7 +60,7 @@ def cmd_store(a) -> int:
     if r.get("linked"):
         print(f"Linked to {r['linked']['target']} [{r['linked']['edge_type']}].")
     for w in r.get("warnings", []):
-        print(f"⚠ {w}")
+        print(f"{sym('⚠', '[!]')} {w}")
     for c in r.get("related_candidates", []):
         print(f"Related candidate: #{c['id']} [{c['node_id']}] ({c['similarity']})")
     return 0
@@ -96,7 +97,7 @@ def cmd_unlink(a) -> int:
     print(f"Unlinked edge #{r['edge_id']} ({r['source']} → {r['target']} [{r['edge_type']}]).")
     for n in r["orphaned"]:
         m = queries.resolve_ref(conn, n)
-        print(f"⚠ #{m['id']} now has 0 edges (orphan). Consider linking.")
+        print(f"{sym('⚠', '[!]')} #{m['id']} now has 0 edges (orphan). Consider linking.")
     return 0
 
 
@@ -168,7 +169,7 @@ def cmd_similar(a) -> int:
         print(f"exact: #{dup['id']} [{dup['node_id']}] '{dup['title']}'")
         return 0
     vec = embeddings.embed(a.content)
-    if vec is None:
+    if vec is None or not has_vec(conn):
         print("(embeddings unavailable — only exact-hash checked; no exact match)")
         return 0
     cfg = load_config()["embedding"]
@@ -341,10 +342,11 @@ def cmd_setup(a) -> int:
     if cfg["enabled"] and not models.installed(cfg["model"]):
         print(f"downloading default embedding model '{cfg['model']}' ...")
         if models.install(cfg["model"]) != 0:
-            print("⚠ model download failed — trailmem works in FTS-only mode until "
+            print(f"{sym('⚠', '[!]')} model download failed — trailmem works in FTS-only mode until "
                   f"`trailmem model install {cfg['model']}` succeeds.")
     print("MCP registration: run `trailmem integrate` (auto-detect, asks first), or manually →")
-    print('  claude mcp add trailmem -- trailmem-mcp')
+    print(f"  claude mcp add trailmem -e TRAILMEM_AGENT_TYPE=claude -- "
+          f"{sys.executable} -u -m trailmem.mcp_server")
     return 0
 
 
@@ -389,34 +391,37 @@ def cmd_update(a) -> int:
         cmdline = [sys.executable, "-m", "pip", "install", "--upgrade", "trailmem"]
     print("Running:", " ".join(cmdline))
     if subprocess.run(cmdline).returncode != 0:
-        print("✗ upgrade failed — run the command above manually.")
+        print(f"{sym('✗', '[X]')} upgrade failed — run the command above manually.")
         return 1
-    print(f"✓ Updated to {latest}. Restart your agents so MCP servers pick it up "
-          "(a schema migration runs on first start; old servers must not keep writing).")
+    print(f"{sym('✓', '[OK]')} Updated to {latest}. Run `trailmem integrate` to refresh "
+          "host configs (the server launch shape can change between releases), then "
+          "restart your agents (a schema migration runs on first start; old servers "
+          "must not keep writing).")
     return 0
 
 
 def cmd_doctor(a) -> int:
     ok = True
+    yes, no = sym("✓", "[OK]"), sym("✗", "[X]")
     cfg = load_config()
-    print(f"home:   {TRAILMEM_HOME} {'✓' if TRAILMEM_HOME.exists() else '✗ (run trailmem setup)'}")
-    print(f"config: {CONFIG_PATH} {'✓' if CONFIG_PATH.exists() else '✗'}")
+    print(f"home:   {TRAILMEM_HOME} {yes if TRAILMEM_HOME.exists() else no + ' (run trailmem setup)'}")
+    print(f"config: {CONFIG_PATH} {yes if CONFIG_PATH.exists() else no}")
     if not db_path().exists():
-        print(f"db:     {db_path()} ✗ (run trailmem setup)")
+        print(f"db:     {db_path()} {no} (run trailmem setup)")
         return 1
     conn = connect()
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for t in ("memories", "edges", "sessions", "memories_fts"):
         present = t in tables
         ok &= present
-        print(f"table:  {t} {'✓' if present else '✗'}")
+        print(f"table:  {t} {yes if present else no}")
     emb = cfg["embedding"]
     if emb["enabled"]:
         vec = has_vec(conn)
-        print(f"vec:    sqlite-vec {'✓' if vec else '✗ DEGRADED — FTS-only, near-dup detection OFF'}")
+        print(f"vec:    sqlite-vec {yes if vec else no + ' DEGRADED — FTS-only, near-dup detection OFF'}")
         got = models.installed(emb["model"])
         print(f"model:  {emb['model']} ({emb['dimensions']}d) "
-              f"{'✓' if got else '✗ not installed — run: trailmem model install ' + emb['model']}")
+              f"{yes if got else no + ' not installed — run: trailmem model install ' + emb['model']}")
         ok &= vec and got
     else:
         print("vec:    disabled by config — FTS-only mode (exact-hash dedup only)")
@@ -470,9 +475,10 @@ def cmd_statusline(a) -> int:
             "SELECT COUNT(*) FROM memories WHERE session_id = ?", (sid,)
         ).fetchone()[0]
         if n > 0:
-            print(f"🧠 trailmem: {n} saved this session")
+            print(f"{sym('🧠', '[TM]')} trailmem: {n} saved this session")
         else:
-            print("⚠ trailmem: 0 saved this session · save before exit")
+            print(f"{sym('⚠', '[!]')} trailmem: 0 saved this session "
+                  f"{sym('·', '-')} save before exit")
     except Exception:
         pass  # statusline must never emit an error or block the host
     return 0
@@ -514,6 +520,7 @@ def cmd_hook(a) -> int:
 # ---- parser ----
 
 def main(argv=None) -> int:
+    console.configure()  # UTF-8 crash guard — before any output (Windows cp1252)
     p = argparse.ArgumentParser(
         prog="trailmem",
         description="Graph-linked persistent memory for AI coding agents",

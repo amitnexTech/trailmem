@@ -21,16 +21,27 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .console import sym
+
 SERVER_NAME = "trailmem"
 
 
-def mcp_command() -> str:
-    """Absolute path of trailmem-mcp so hosts don't depend on the user's PATH."""
-    found = shutil.which("trailmem-mcp")
-    if found:
-        return str(Path(found).resolve())
-    sibling = Path(sys.argv[0]).resolve().parent / "trailmem-mcp"
-    return str(sibling) if sibling.exists() else "trailmem-mcp"
+def mcp_command() -> tuple[str, list[str]]:
+    """Server launch shape: current Python + `-u -m trailmem.mcp_server`.
+
+    NEVER a generated `trailmem-mcp` launcher: Windows Smart App Control
+    blocks per-install unsigned .exes (Event Viewer CodeIntegrity 3077), so a
+    host-spawned server dies silently with no fallback. sys.executable is the
+    venv python that has trailmem installed (uv tool / pipx / pip alike), and
+    `-u` keeps stdio unbuffered for MCP framing."""
+    return sys.executable, ["-u", "-m", "trailmem.mcp_server"]
+
+
+def _uses_old_launcher(existing: dict) -> bool:
+    """Pre-0.1.7 entries launch the removed trailmem-mcp script."""
+    cmd = existing.get("command")
+    parts = cmd if isinstance(cmd, list) else [cmd or ""]
+    return any("trailmem-mcp" in str(p) for p in parts)
 
 
 def _backup(path: Path) -> None:
@@ -65,11 +76,29 @@ def _patch_json_map(path: Path, key: str, entry: dict) -> str:
     servers = data.setdefault(key, {})
     existing = servers.get(SERVER_NAME)
     if isinstance(existing, dict):
-        missing = [k for k in ("env", "environment") if k in entry and k not in existing]
-        if not missing:
+        if _uses_old_launcher(existing):
+            # Rebuild from the new entry (stale keys like a leftover "args"
+            # can be rejected by strict hosts — Kilo refuses unknown keys),
+            # but keep any user-added env vars. The TRAILMEM_AGENT_TYPE pin
+            # MUST survive this — without it every store hard-rejects.
+            fresh = dict(entry)
+            for k in ("env", "environment"):
+                if k in existing:
+                    fresh[k] = {**entry.get(k, {}), **existing[k]}
+            servers[SERVER_NAME] = fresh
+            _write_json(path, data)
+            return "upgraded to python -m launch"
+        # The env MAP existing is not enough — the PIN inside it is what
+        # attribution needs (an entry with only user-custom vars still breaks
+        # every store).
+        envkey = next((k for k in ("env", "environment") if k in entry), None)
+        have = existing.get(envkey) if envkey else None
+        if envkey and not isinstance(have, dict):
+            existing[envkey] = entry[envkey]
+        elif envkey and "TRAILMEM_AGENT_TYPE" not in have:
+            have["TRAILMEM_AGENT_TYPE"] = entry[envkey]["TRAILMEM_AGENT_TYPE"]
+        else:
             return "already registered"
-        for k in missing:
-            existing[k] = entry[k]
         _write_json(path, data)
         return "added agent-attribution env"
     servers[SERVER_NAME] = entry
@@ -83,22 +112,28 @@ def _claude_detect() -> bool:
     return shutil.which("claude") is not None
 
 
-def _claude_integrate(cmd: str) -> str:
+def _claude_integrate(cmd: str, args: list[str]) -> str:
     # Claude detects via its own CLAUDECODE env, but the explicit env pin keeps
     # attribution correct even if a project-scope .mcp.json overrides this entry.
-    already = subprocess.run(
-        ["claude", "mcp", "get", SERVER_NAME], capture_output=True, timeout=15
-    ).returncode == 0
-    if already:
-        return "already registered"
+    got = subprocess.run(
+        ["claude", "mcp", "get", SERVER_NAME], capture_output=True, text=True, timeout=15
+    )
+    upgraded = ""
+    if got.returncode == 0:
+        if "trailmem-mcp" not in got.stdout:
+            return "already registered"
+        # Old entry launches the removed trailmem-mcp script — re-register.
+        subprocess.run(["claude", "mcp", "remove", "--scope", "user", SERVER_NAME],
+                       capture_output=True, timeout=30)
+        upgraded = " (upgraded to python -m launch)"
     result = subprocess.run(
         ["claude", "mcp", "add", SERVER_NAME, "--scope", "user",
-         "-e", "TRAILMEM_AGENT_TYPE=claude", "--", cmd],
+         "-e", "TRAILMEM_AGENT_TYPE=claude", "--", cmd, *args],
         capture_output=True, text=True, timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "`claude mcp add` failed")
-    return "registered via `claude mcp add --scope user`"
+    return "registered via `claude mcp add --scope user`" + upgraded
 
 
 def _codex_detect() -> bool:
@@ -121,18 +156,29 @@ def _codex_install_prompt() -> str:
 _CODEX_ENV_LINE = 'env = { TRAILMEM_AGENT_TYPE = "codex" }'
 
 
-def _codex_integrate(cmd: str) -> str:
-    # Appending a new table (or one line inside ours) is the only TOML edit the
-    # stdlib can do safely. Codex spawns MCP servers with a clean env (verified
-    # live: no CODEX_THREAD_ID reaches the server), so the env pin is required.
+def _codex_integrate(cmd: str, args: list[str]) -> str:
+    # Appending a new table (or rewriting OUR known-shape table) is the only
+    # TOML edit the stdlib can do safely. Codex spawns MCP servers with a clean
+    # env (verified live: no CODEX_THREAD_ID reaches the server), so the env
+    # pin is required.
     path = Path.home() / ".codex" / "config.toml"
     text = path.read_text() if path.exists() else ""
     header = f"[mcp_servers.{SERVER_NAME}]"
+    # TOML literal (single-quote) strings: no escape processing, so Windows
+    # backslash paths (C:\...\python.exe) survive verbatim.
+    args_toml = "[" + ", ".join(f"'{a}'" for a in args) + "]"
+    entry = f"{header}\ncommand = '{cmd}'\nargs = {args_toml}\n{_CODEX_ENV_LINE}\n"
     if header in text:
         start = text.index(header)
         end = text.find("\n[", start + len(header))
         block = text[start: end if end != -1 else len(text)]
-        if "TRAILMEM_AGENT_TYPE" in block:
+        if "trailmem-mcp" in block:
+            # Old entry launches the removed trailmem-mcp script — rewrite the
+            # whole (our-own, known-shape) table with the python -m launch.
+            _backup(path)
+            path.write_text(text[:start] + entry + (text[end:] if end != -1 else ""))
+            reg = "upgraded to python -m launch"
+        elif "TRAILMEM_AGENT_TYPE" in block:
             reg = "already registered"
         else:
             _backup(path)
@@ -142,7 +188,6 @@ def _codex_integrate(cmd: str) -> str:
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
         _backup(path)
-        entry = f'{header}\ncommand = "{cmd}"\nargs = []\n{_CODEX_ENV_LINE}\n'
         prefix = text if not text or text.endswith("\n") else text + "\n"
         path.write_text(prefix + ("\n" if text else "") + entry)
         reg = f"wrote {path}"
@@ -161,8 +206,8 @@ _HOME = Path.home
 # "environment" (app.kilo.ai/config.json, opencode.ai/config.json
 # McpLocalConfig); the mcpServers-shaped hosts and Zed use "env".
 def _std(agent):
-    return lambda cmd: {"command": cmd, "args": [],
-                        "env": {"TRAILMEM_AGENT_TYPE": agent}}
+    return lambda cmd, args: {"command": cmd, "args": args,
+                              "env": {"TRAILMEM_AGENT_TYPE": agent}}
 
 
 JSON_HOSTS = [
@@ -175,8 +220,8 @@ JSON_HOSTS = [
               or (_HOME() / ".kilo" / "bin" / "kilo").exists()
               or (_HOME() / ".config" / "kilo" / "kilo.jsonc").exists()),
      lambda: _HOME() / ".config" / "kilo" / "kilo.jsonc",
-     "mcp", lambda cmd: {"type": "local", "command": [cmd],
-                         "environment": {"TRAILMEM_AGENT_TYPE": "kilo"}}),
+     "mcp", lambda cmd, args: {"type": "local", "command": [cmd, *args],
+                               "environment": {"TRAILMEM_AGENT_TYPE": "kilo"}}),
     ("OpenCode",
      lambda: (shutil.which("opencode") is not None
               or (_HOME() / ".config" / "opencode").is_dir()
@@ -185,8 +230,8 @@ JSON_HOSTS = [
               if (_HOME() / ".opencode.json").exists()
               and not (_HOME() / ".config" / "opencode" / "opencode.json").exists()
               else _HOME() / ".config" / "opencode" / "opencode.json"),
-     "mcp", lambda cmd: {"type": "local", "command": [cmd], "enabled": True,
-                         "environment": {"TRAILMEM_AGENT_TYPE": "opencode"}}),
+     "mcp", lambda cmd, args: {"type": "local", "command": [cmd, *args], "enabled": True,
+                               "environment": {"TRAILMEM_AGENT_TYPE": "opencode"}}),
     ("Antigravity",
      lambda: ((_HOME() / ".antigravity-ide").exists()
               or (_HOME() / ".gemini" / "antigravity-cli").exists()
@@ -197,8 +242,8 @@ JSON_HOSTS = [
      lambda: (shutil.which("zed") is not None
               or (_HOME() / ".config" / "zed").is_dir()),
      lambda: _HOME() / ".config" / "zed" / "settings.json",
-     "context_servers", lambda cmd: {"source": "custom", "command": cmd, "args": [],
-                                     "env": {"TRAILMEM_AGENT_TYPE": "zed"}}),
+     "context_servers", lambda cmd, args: {"source": "custom", "command": cmd, "args": args,
+                                           "env": {"TRAILMEM_AGENT_TYPE": "zed"}}),
     ("Cursor",
      lambda: (_HOME() / ".cursor").is_dir(),
      lambda: _HOME() / ".cursor" / "mcp.json",
@@ -257,8 +302,8 @@ def _hosts() -> list[tuple]:
     for name, detect, path, key, entry in JSON_HOSTS:
         hosts.append((
             name, detect,
-            lambda cmd, path=path, key=key, entry=entry:
-                _patch_json_map(path(), key, entry(cmd)),
+            lambda cmd, args, path=path, key=key, entry=entry:
+                _patch_json_map(path(), key, entry(cmd, args)),
         ))
     return hosts
 
@@ -267,16 +312,18 @@ HOSTS = _hosts()
 
 
 def run() -> int:
-    cmd = mcp_command()
+    cmd, args = mcp_command()
+    launch = " ".join([cmd, *args])
     found = [(name, fn) for name, detect, fn in HOSTS if detect()]
     if not found:
         print("No supported agent hosts detected "
               "(" + ", ".join(name for name, _, _ in HOSTS) + ").")
-        print(f"Any MCP agent works manually: stdio server, command `{cmd}`, no args/env.")
+        print(f"Any MCP agent works manually: stdio server, command `{launch}`, "
+              "env TRAILMEM_AGENT_TYPE=<agent>.")
         print("See the 'Any other MCP agent' section in the README for the config shape.")
         return 0
     print("Found: " + ", ".join(name for name, _ in found))
-    print(f"MCP server command: {cmd}")
+    print(f"MCP server command: {launch}")
     if not sys.stdin.isatty():
         print("Refusing to modify configs without an interactive y/N confirmation.")
         return 1
@@ -286,22 +333,23 @@ def run() -> int:
         print("No changes made.")
         return 0
     failures = 0
+    bad = sym("✗", "[X]")
     for name, fn in found:
         try:
-            print(f"  {name}: {fn(cmd)}")
+            print(f"  {name}: {fn(cmd, args)}")
         except Exception as exc:
             failures += 1
-            print(f"  {name}: ✗ {exc}")
+            print(f"  {name}: {bad} {exc}")
         try:
             skill = _install_skill(name)
             if skill:
                 print(f"  {name}: {skill}")
         except Exception as exc:
-            print(f"  {name}: usage skill ✗ {exc}")
+            print(f"  {name}: usage skill {bad} {exc}")
     if any(name == "Claude Code" for name, _ in found):
         try:
             print(f"  Claude Code /tm-save command: {_install_claude_command()}")
         except Exception as exc:
-            print(f"  Claude Code /tm-save command: ✗ {exc}")
+            print(f"  Claude Code /tm-save command: {bad} {exc}")
     print("Restart the agent(s) to pick up the new MCP server.")
     return 1 if failures else 0

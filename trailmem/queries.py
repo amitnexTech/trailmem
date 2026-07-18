@@ -8,6 +8,7 @@ import re
 import sqlite3
 
 from . import embeddings
+from .schema import has_vec
 from .store import fmt_local, now
 
 
@@ -50,7 +51,7 @@ def query(
     scores: dict[str, float] = {}
 
     vec = embeddings.embed(text)
-    if vec is not None:
+    if vec is not None and has_vec(conn):
         for r in conn.execute(
             "SELECT node_id, (1.0 - distance) AS sim FROM memories_vec "
             "WHERE embedding MATCH ? AND k = 20 ORDER BY distance",
