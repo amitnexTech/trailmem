@@ -1,10 +1,14 @@
 # trailmem — Schema Specification
 
+The SQLite data contract: all tables (memories, edges, vec/FTS indexes, sessions), field validation rules, enums, embedding-model configuration, and app-enforced invariants.
+
+**Status:** REFERENCE
+
 ## Overview
 
 trailmem uses SQLite with 5 core tables: `memories` (core), `edges` (relationships), `memories_vec` (embeddings), `memories_fts` (full-text search), `sessions` (boundary tracking) — plus 2 dashboard support tables (`dashboard_state`, `dashboard_events`) populated by triggers for the [[dashboard]] SSE feed.
 
-**Migrations:** `init_db` is idempotent (`CREATE ... IF NOT EXISTS`), so NEW tables/indexes/triggers self-heal on old DBs. Changes to EXISTING tables (e.g. `ALTER TABLE ... ADD COLUMN`) go in the append-only `MIGRATIONS` list in `schema.py`, tracked via `PRAGMA user_version` — each entry runs exactly once, in order, on any DB that predates it. A FRESH DB is created at the current schema, so `init_db` pre-marks `user_version = len(MIGRATIONS)` on first create (else a migration would `ALTER` a column that already exists). Never edit or reorder shipped entries.
+**Migrations:** `init_db` is idempotent (`CREATE ... IF NOT EXISTS`), so NEW tables/indexes/triggers self-heal on old DBs. Changes to EXISTING tables (e.g. `ALTER TABLE ... ADD COLUMN`) go in the append-only `MIGRATIONS` list in `schema.py`, tracked via `PRAGMA user_version` — each entry runs exactly once, in order, on any DB that predates it. A FRESH DB is created at the current schema, so `init_db` pre-marks `user_version = len(MIGRATIONS)` on first create (else a migration would `ALTER` a column that already exists). Migration 2 adds nullable session write accounting: rows with matched memories get a positive backfill, while unmatched legacy rows stay `NULL` (unknown) to avoid false zero-save warnings. Never edit or reorder shipped entries.
 
 ## Connection Setup
 
@@ -56,15 +60,15 @@ CREATE TABLE memories (
 | project | Absolute path or NULL | System auto-fill from cwd, NULL=global | Scope isolation. An explicit project (param/`TRAILMEM_PROJECT`) must be an **absolute path** or the literal `"global"` — a bare name (e.g. `jarvis_build`) is **rejected**, since it silently splits a project's memories from its cwd-derived absolute-path form. Omit to auto-fill from cwd. |
 | session_id | Free text, nullable | System auto-fill from env var | Groups work within one session. |
 | source_uri | Free text, nullable | Agent optional | Origin: file path, session ref, URL. |
-| code_files | Comma-separated paths, nullable | Agent optional | Source/config files touched in this work. |
-| doc_files | Comma-separated paths, nullable | Agent optional | Docs/spec pages touched in this work. Split from a single `modified_files` field (migration 1) — two named fields prompt agents to record BOTH kinds; the generic field got only doc paths in practice. |
+| code_files | Comma-separated paths, nullable in DB | Agent MUST provide (`'none'` → NULL) | Source/config files touched in this work. Required on store since 0.1.8: pass paths or the literal `'none'` — an omitted field is rejected, so NULL in new rows always means "explicitly no files", never "agent forgot" (pre-0.1.8 rows stay ambiguous). |
+| doc_files | Comma-separated paths, nullable in DB | Agent MUST provide (`'none'` → NULL) | Docs/spec pages touched in this work. Same required-on-store rule as code_files. Split from a single `modified_files` field (migration 1) — two named fields prompt agents to record BOTH kinds; the generic field got only doc paths in practice. |
 | pinned | 0 or 1 | Agent sets | 1 = always in welcome, never buried. |
 | created_at | ISO 8601 timestamp | System | Immutable after creation. Stored in **UTC** (`datetime.now(UTC)`); human-facing surfaces (CLI, welcome, dashboard) render it in the **system local timezone** via `store.fmt_local()` so a memory made near UTC midnight is not shown on the wrong day. |
 | updated_at | ISO 8601 timestamp, nullable | System (on edit) | Set when content/title changes. |
 | access_count | Integer >= 0 | System (on query result) | NOT incremented on welcome. Only explicit queries. |
 | last_accessed | ISO 8601 timestamp, nullable | System (on query result) | |
-| status | active/archived/superseded | Agent explicit action | Default: active. |
-| archive_reason | Min 20 chars when status != active | Agent (mandatory on archive) | WHY archived/superseded. App-enforced, not DB CHECK. |
+| status | active/archived/superseded/completed/cancelled | Agent explicit action | Default: active. `completed`/`cancelled` close tasks whose work finished/was dropped; `archived` is for wrong/outdated info. All non-active statuses drop out of welcome. |
+| archive_reason | Min 20 chars when status != active | Agent (mandatory on any close) | WHY closed. App-enforced, not DB CHECK. |
 | content_hash | SHA256(content) | System | For exact-duplicate detection. |
 
 ### event_type Enum (application-validated, not DB CHECK)
@@ -112,23 +116,25 @@ def auto_fill(agent_input, env):
     filled['created_at'] = datetime.now(UTC).isoformat()
     filled['content_hash'] = hashlib.sha256(agent_input['content'].encode()).hexdigest()
     
-    # System auto-fill (agent CAN override):
-    agent = agent_input.get('agent_type') or env.get('TRAILMEM_AGENT_TYPE') or detect_from_env()
-    if not agent:
-        # LOUD reject — never store a NULL/"unknown" agent (this was OMEGA's exact bug:
-        # ~20 rows landed with agent_type NULL because detection silently failed).
-        raise ValidationError(
-            "agent_type could not be determined (no param, no TRAILMEM_AGENT_TYPE, "
-            "no known session env var). Pass agent_type explicitly. Refusing to store unattributed."
-        )
-    filled['agent_type'] = agent
-    filled['project'] = agent_input.get('project') or os.getcwd()
-    filled['session_id'] = agent_input.get('session_id') or env.get('CLAUDE_CODE_SESSION_ID') or env.get('KIRO_SESSION_ID')
+    # Host adapters translate native fields once. Core consumes only this
+    # versioned context; it never knows CODEX_*, CLAUDE_*, KIRO_*, etc.
+    context = SessionContext.from_payload(agent_input['session_context'])
+    filled['agent_type'] = context.agent_type
+    filled['project'] = context.project
+    filled['session_id'] = context.key  # <agent>:<external-session-id>
     
     return filled
 ```
 
-**`agent_type` is `NOT NULL` AND undetectable → hard reject, not silent "unknown".** `agent_type` has a required-with-fallback contract: auto-detect where possible, explicit override always allowed, but if BOTH fail the store errors rather than writing an unattributed row. This is the structural fix for the original NULL-agent bug — the rule lives in code, not in a reminder the agent can forget. (`project` auto-fills from cwd when omitted and `session_id` degrades to NULL; but an *explicitly supplied* non-absolute, non-`global` project hard-rejects — only `agent_type` hard-rejects on the detect path.)
+Canonical context validation rejects non-string or over-512-character external
+session IDs, unknown lifecycle events, and non-slug sources. This validation
+also applies to read-only/stateless-capable tools whenever a canonical envelope
+is supplied.
+
+**`agent_type` is `NOT NULL` AND unresolved identity hard-rejects, never writes
+`unknown`.** Integrated hosts provide canonical context. Unknown hosts use the
+generic `TRAILMEM_AGENT_TYPE` contract. Project defaults to cwd and a missing
+real session ID degrades to stateless operation, never a PID-derived row.
 
 ---
 
@@ -218,7 +224,9 @@ CREATE TABLE sessions (
     project TEXT,
     started_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
-    last_welcome_at TEXT
+    last_welcome_at TEXT,
+    write_count INTEGER NOT NULL DEFAULT 0,
+    last_write_at TEXT
 );
 ```
 
@@ -228,10 +236,14 @@ CREATE TABLE sessions (
 - `started_at` — BOUNDARY marker. Set ONCE on first `trailmem_*` call. IMMUTABLE after that.
 - `last_seen_at` — Activity marker. Updated on welcome + stop-hook only. For purge/stale detection.
 - `last_welcome_at` — Anti-bloat. Tracks when welcome was last served this session.
+- `write_count` / `last_write_at` — successful create/edit activity for save-awareness.
 
 **Key Rules:**
 - Boundary query uses `started_at` ONLY — never `last_seen_at`
-- Boundary query MUST exclude current session_id: `WHERE session_id != current`
+- Session key format is `<agent>:<external-session-id>` to avoid cross-host collisions.
+- Native host IDs are resolved only by `trailmem/hosts/<host>.py`; sessions and
+  storage code consume the canonical key.
+- Boundary query MUST match the same agent + project, exclude current, and ignore historical PID/CLI/adhoc rows.
 - `started_at` NEVER updated after initial set (INSERT ON CONFLICT updates only last_seen_at)
 - Session row created on FIRST `trailmem_*` call (lazy, not welcome-only)
 - Stop-hook is NON-CRITICAL — boundary safe from started_at regardless
@@ -240,8 +252,8 @@ CREATE TABLE sessions (
 ```sql
 -- First trailmem_* call (any tool): register session (lazy)
 -- CRITICAL INVARIANT: last_welcome_at NEVER set here. Only trailmem_welcome writes it.
-INSERT INTO sessions (session_id, agent_type, project, started_at, last_seen_at)
-VALUES (?, ?, ?, now(), now())
+INSERT INTO sessions (session_id, agent_type, project, started_at, last_seen_at, write_count)
+VALUES (?, ?, ?, now(), now(), 0)
 ON CONFLICT(session_id) DO UPDATE SET last_seen_at = excluded.last_seen_at;
 -- started_at NOT in DO UPDATE — never clobbered
 -- last_welcome_at NOT touched — preserves anti-bloat logic
@@ -255,7 +267,7 @@ COMMIT;
 
 -- Boundary fetch (BEFORE registering in welcome, exclude current):
 SELECT MAX(started_at) FROM sessions 
-WHERE agent_type = ? AND session_id != ?;
+WHERE agent_type = ? AND project IS ? AND session_id != ?;
 ```
 
 **Maintenance:** Sessions >90 days old auto-purged in `trailmem maintain --apply`.
@@ -322,7 +334,7 @@ CREATE UNIQUE INDEX idx_edges_unique ON edges(source_node_id, target_node_id, ed
 
 ---
 
-## Related specs
+## Related
 
 - [[welcome]] — how sessions/pinned/boundary tables drive the briefing.
 - [[dedup]] — content_hash + embedding duplicate policy on store.

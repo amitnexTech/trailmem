@@ -48,7 +48,7 @@ trailmem doctor         # health check
 trailmem integrate      # detects installed agent hosts, asks before writing any config
 ```
 
-`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), skips hosts that are already registered, and never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed instead). On Claude Code it also installs a `/tm-save` slash command. On hosts that read Agent Skills (Claude Code, Codex, Kilo, OpenCode) it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source.
+`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), and skips hosts that are already registered. **Configs are auto-written only for hosts whose format is verified against the live binary** — Claude Code (via its own `claude mcp add`), Codex, Kiro, Kilo. For the other detected hosts it prints the exact entry to paste instead of editing their config (hand-written entries have corrupted host configs before; a host is promoted to auto-write once its format is verified). It also never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed too). On Claude Code it installs a `/tm-save` slash command; on Codex a `/prompts:trailmem-save` prompt and a SessionStart hook (`~/.codex/hooks.json` — trust it via `/hooks` after restarting Codex). On hosts that read Agent Skills (Claude Code, Codex, Kilo, OpenCode) it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source.
 
 > **Windows note:** the MCP server is registered as `python -u -m trailmem.mcp_server` — never as a generated `.exe`. Windows **Smart App Control** silently blocks unsigned per-install launcher `.exe`s (the kind pip/uv generate), which kills a host-spawned server with no error anywhere. If the `trailmem` CLI itself is blocked by SAC, run it as `python -m trailmem` from the environment it's installed into.
 
@@ -68,7 +68,7 @@ Clients with no prompt support (e.g. **Codex**, **aider**) use the plain-text pa
 
 **Reminders** so you remember to trigger it:
 
-- **Statusline** — `trailmem statusline` prints `🧠 trailmem: N saved this session`, or `⚠ 0 saved · save before exit` when nothing's captured yet. Reads `session_id` from stdin JSON (Claude Code) or `CLAUDE_CODE_SESSION_ID`/`KIRO_SESSION_ID` env; read-only, always exits 0. Wire it into your host's statusline, or run it standalone.
+- **Statusline** — `trailmem statusline` reports successful creates and edits for the authoritative session ID from hook stdin or env. Without a real session ID it prints nothing.
 - **Welcome tip** — the briefing ends with a save reminder (shown by hosts that surface the session-start output, e.g. Codex, Kilo).
 - **Next-session flag** — if the previous session stored nothing, the next welcome opens with a loud reminder.
 
@@ -96,7 +96,7 @@ Trailmem works with **any agent that speaks MCP** — Cursor, Windsurf, Cline, Z
 
 1. **Transport:** stdio (no URL, no port, no HTTP).
 2. **Command:** `<python> -u -m trailmem.mcp_server` — the interpreter trailmem is installed into, launched as a module. There is deliberately no `trailmem-mcp` executable: Windows Smart App Control silently blocks per-install unsigned launcher `.exe`s, which killed host-spawned servers with no error. `python -m` needs no launcher and works on every OS.
-3. **Server name:** `trailmem` (any name works; tool names don't depend on it). Set `TRAILMEM_AGENT_TYPE=<agent>` in the entry's env for correct attribution.
+3. **Identity:** set `TRAILMEM_AGENT_TYPE=<lowercase-agent-slug>` for attribution. If the host can expose a stable conversation ID to child processes, also set `TRAILMEM_SESSION_ID=<real-id>`.
 
 Most agents use a JSON block shaped like this (key name varies — `mcpServers`, `mcp`, `servers`):
 
@@ -106,7 +106,10 @@ Most agents use a JSON block shaped like this (key name varies — `mcpServers`,
     "trailmem": {
       "command": "/path/to/python",
       "args": ["-u", "-m", "trailmem.mcp_server"],
-      "env": { "TRAILMEM_AGENT_TYPE": "cursor" }
+      "env": {
+        "TRAILMEM_AGENT_TYPE": "myagent",
+        "TRAILMEM_SESSION_ID": "the-hosts-real-session-id"
+      }
     }
   }
 }
@@ -117,6 +120,31 @@ Print the right interpreter path from inside the environment trailmem is install
 ```bash
 python -c "import sys; print(sys.executable)"
 ```
+
+`TRAILMEM_SESSION_ID` is optional. Without it, all six tools still work with
+agent/project attribution, but welcome is stateless: no boundary, anti-bloat,
+or zero-save claims. A host can instead pass the optional `session_id` MCP
+argument on each call. Never invent a PID as a session ID.
+
+Native host fields do not belong in TrailMem core. Each integration module in
+`trailmem/hosts/` owns detection, native session/project fields, hooks, and
+config lifecycle, then emits one versioned `session_context`:
+
+```json
+{
+  "schema_version": 1,
+  "agent_type": "myagent",
+  "session_id": "the-hosts-real-session-id",
+  "project": "/absolute/project",
+  "event": "tool-context",
+  "source": "myagent-adapter"
+}
+```
+
+Host modules are auto-discovered, so adding a verified integration requires
+one new `trailmem/hosts/<host>.py` file. Unknown MCP hosts still work through
+the generic `TRAILMEM_AGENT_TYPE` / `TRAILMEM_SESSION_ID` contract; without a
+real session ID they intentionally remain stateless.
 
 Then restart the agent and check the wiring: the agent should see six `trailmem_*` tools, and calling `trailmem_welcome` should return a briefing. `trailmem doctor` verifies the database side.
 
@@ -145,7 +173,7 @@ trailmem uninstall           # remove trailmem from agent configs — memories a
 trailmem uninstall --purge   # ALSO delete ~/.trailmem (every memory, irreversible)
 ```
 
-`trailmem uninstall` surgically reverses everything `integrate` wrote — the `trailmem` MCP entry in each host's config, the usage skills, `/tm-save`, the Codex prompt — and leaves the rest of every config untouched. **Your memories at `~/.trailmem` are kept by default**: reinstalling trailmem later brings them all back automatically. Only `--purge` (with a typed confirmation) deletes them. At the end it prints the command to remove the package itself (`uv tool uninstall trailmem` / `pipx uninstall trailmem` / `pip uninstall trailmem`, matching how you installed).
+`trailmem uninstall` surgically reverses everything `integrate` (this or any older release) wrote — the `trailmem` MCP entry in each host's config, the usage skills, `/tm-save`, the Codex prompt and SessionStart hook — and leaves the rest of every config untouched. **Your memories at `~/.trailmem` are kept by default**: reinstalling trailmem later brings them all back automatically. Only `--purge` (with a typed confirmation) deletes them. At the end it prints the command to remove the package itself (`uv tool uninstall trailmem` / `pipx uninstall trailmem` / `pip uninstall trailmem`, matching how you installed).
 
 The agent then gets six tools: `trailmem_welcome` (once-per-session briefing), `trailmem_store`, `trailmem_query`, `trailmem_show`, `trailmem_edit`, `trailmem_link`. Everything is also available to humans via the `trailmem` CLI (`store`, `query`, `show`, `list`, `stats`, `link`, `archive`, ...).
 

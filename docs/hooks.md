@@ -1,11 +1,40 @@
 # trailmem — Hooks Specification (Q14)
 
+Session lifecycle integration with agent hosts: the `trailmem hook session-start/session-stop` commands, per-host registration, save-awareness surfaces, and the no-per-turn-hooks rule.
+
+**Status:** REFERENCE
+
 ## Philosophy
 
 Hooks are **conveniences, not load-bearing**. Every hook can fail or be absent and the system stays correct:
 - Boundary safety comes from `started_at` (set lazily on first `trailmem_*` call) — not from any hook.
 - Welcome is available manually (`trailmem_welcome` / `trailmem welcome`) — the hook just automates the first call.
-- **No per-turn hooks.** No PreToolUse/PostToolUse/UserPromptSubmit injection. This is a hard rule — per-turn memory injection was OMEGA's single biggest token-burn source (hook blocks repeated on every prompt). trailmem injects context exactly once per session (welcome), everything else is on-demand.
+- **No per-turn content injection.** Hook output never adds memory content on
+  every prompt/tool call. A targeted, zero-context `PreToolUse` adapter is
+  allowed only to carry an authoritative canonical `session_context` into
+  TrailMem's own MCP arguments.
+
+## Host Adapter Contract
+
+Every native host mechanic lives in one auto-discovered
+`trailmem/hosts/<host>.py` module: agent detection, native session env names,
+hook payload keys, project extraction, and hook/config install/uninstall.
+Core code receives only:
+
+```json
+{
+  "schema_version": 1,
+  "agent_type": "codex",
+  "session_id": "thread-id",
+  "project": "/abs/project",
+  "event": "tool-context",
+  "source": "codex-adapter"
+}
+```
+
+Invariant: one host conversation produces one `SessionContext` and one
+namespaced `<agent>:<external-id>` session row. A new verified host requires
+one host module; the registry discovers it automatically.
 
 ## Hook Entry Point (CLI)
 
@@ -14,13 +43,20 @@ One hidden subcommand serves all hook events:
 ```bash
 trailmem hook session-start [--agent <type>]   # prints welcome text to stdout
 trailmem hook session-stop  [--agent <type>]   # updates sessions.last_seen_at, prints nothing
+trailmem hook tool-context [--agent <type>]    # rewrites TrailMem MCP input, JSON only
 ```
 
-Rules for both:
+Rules for all events:
 - **Always exit 0.** A memory-system failure must never block or delay the agent's session. Errors go to stderr + `~/.trailmem/hooks.log`, stdout stays clean.
 - **Fast by construction:** welcome needs no embedding model, and DB waits are bounded by `busy_timeout=3000`. The enforced cap is the HOST-side hook timeout (10s start / 5s stop in the registration below) — there is no separate internal timer. If the DB is unavailable, the error goes to `~/.trailmem/hooks.log` and the hook still exits 0.
-- Agent identity: `--agent` flag > `TRAILMEM_AGENT_TYPE` env > auto-detect from env (`CLAUDE_CODE_SESSION_ID` present → claude, `KIRO_SESSION_ID` → kiro, …).
-- Session id: from env (same detection). No session id in env → skip session registration, still print welcome (session-less mode, boundary untracked).
+- Agent identity: trusted hook `--agent` > `TRAILMEM_AGENT_TYPE`. Native env
+  detection is adapter-owned, never a core fallback.
+- **Native stdin is adapter input.** Each host module maps its verified payload
+  keys to canonical agent/session/project fields. `TRAILMEM_PROJECT` remains an
+  explicit project override. Garbage/absent stdin is ignored silently.
+- Session id fallback: `TRAILMEM_SESSION_ID` or a verified host-specific env.
+  No session id anywhere means stateless briefing and no session row.
+  PID/CLI/adhoc pseudo-sessions are forbidden.
 
 ## session-start
 
@@ -51,7 +87,46 @@ Rules for both:
 }
 ```
 
-Other hosts (Kiro/Codex/OpenCode) register the same two commands in their own hook config with their agent name. Hosts with no hook system: agent calls `trailmem_welcome` manually per its steering rules — lazy fallback covers registration either way.
+### Codex registration (`~/.codex/hooks.json`)
+
+`trailmem integrate` writes/merges two narrow hooks. Codex's MCP child does not
+receive `CODEX_THREAD_ID`, so `PreToolUse` carries the event's authoritative
+canonical `session_context` into TrailMem MCP calls through `updatedInput`.
+It emits no model-visible context.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          { "type": "command", "command": "\"<python>\" -m trailmem hook session-start --agent codex", "timeout": 10, "statusMessage": "Loading trailmem briefing" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__trailmem__trailmem_.*$",
+        "hooks": [
+          { "type": "command", "command": "\"<python>\" -m trailmem hook tool-context --agent codex", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+(`<python>` is `sys.executable` of the install — same rationale as the MCP launch shape: no unsigned per-install .exe, no PATH dependence.)
+
+`resume` is intentionally excluded because it is the same Codex session and
+must not inject another welcome. `clear` remains because it starts a new
+conversation boundary. No stop hook is installed: Codex `Stop` is turn-scoped,
+not session-scoped.
+
+After integrate writes the hook, restart Codex and trust the new definition via `/hooks` (a changed hook hash re-prompts for review). `trailmem uninstall` removes only the trailmem entry from `hooks.json`, leaving foreign hooks intact.
+
+Other hosts (Kiro/OpenCode) register the same commands in their own hook config with their agent name. Hosts with no hook system: agent calls `trailmem_welcome` manually per its steering rules — lazy fallback covers registration either way.
 
 ### Non-hook hosts — two portable surfaces (one per host, never both)
 
@@ -89,8 +164,12 @@ The `save_session` prompt body and the `tm-save.md` file carry the *same* instru
 ### The reminders — so the user remembers to trigger a save
 
 - **Welcome tip** — the full welcome briefing ends with a one-line reminder to save before exit. Universal across hosts.
-- **`trailmem statusline`** — a CLI that reads `session_id` from stdin JSON (Claude Code) or env, counts `memories WHERE session_id = ?`, and prints a one-line status: `🧠 trailmem: N saved this session`, or an amber `⚠ trailmem: 0 saved · save before exit` when nothing has been stored yet (non-UTF consoles get ASCII marks `[TM]`/`[!]` instead of emoji — 0.1.7 console fallback). Read-only, always exits 0. Wire it into a host statusline; for hosts without one, run it standalone.
-- **Next-session flag** — if a prior session (same agent) registered but stored **zero** memories, the next welcome opens with a loud `🛑 LAST SESSION SAVED 0 MEMORIES` line. The backup for a forgotten save.
+- **`trailmem statusline`** — reports `sessions.write_count`. Successful creates
+  and changed/linked edits count; duplicates and no-op edits do not. Legacy
+  unknown rows and session-less hosts produce no status.
+- **Next-session flag** — only the immediately previous authoritative session
+  for the same agent and project can trigger the zero-save warning. Legacy/PID
+  rows and older zero sessions are ignored.
 
 None of these auto-generate memory content (that stays the agent's job — the anti-bloat rule holds); they only surface the gap and give the user/agent a one-command way to act on it.
 
@@ -102,19 +181,20 @@ None of these auto-generate memory content (that stays the agent's job — the a
 | session-stop hook missing/fails | `last_seen_at` slightly stale | None needed — boundary uses `started_at`; purge tolerance is 90 days |
 | DB locked (concurrent agent) | WAL + BEGIN IMMEDIATE retry (3×, 100ms backoff), then exit 0 silently | Welcome available on manual retry |
 | Model missing (embeddings) | Welcome unaffected (no embedding needed for welcome queries) | `trailmem doctor` flags it |
-| No session id in env | Welcome prints, boundary untracked for this session | Fine for one-off CLI use |
+| No authoritative session id | Stateless welcome; CRUD works; no boundary/save claims | Adapter must emit one, or set `TRAILMEM_SESSION_ID` / pass legacy MCP `session_id` |
 
 ## What trailmem Hooks Will NEVER Do
 
-- Inject content on every prompt/tool-call (per-turn noise — OMEGA's mistake).
+- Inject memory content on every prompt/tool-call.
 - Auto-store memories on any lifecycle event (junk factory — locked Q10).
 - Block, delay, or fail the host session (always exit 0).
 - Instruct the agent to relay marketing/upsell text (nagware — the reason this project exists).
 
 ---
 
-## Related specs
+## Related
 
+- [[host-integration]] — adapter implementation and verification guide.
 - [[welcome]] — the exact briefing path SessionStart invokes; boundary + anti-bloat behavior.
 - [[mcp]] — process/concurrency contracts (stdio, WAL, `BEGIN IMMEDIATE`) the hook shares.
 - [[schema]] — `sessions` table the stop-hook updates.

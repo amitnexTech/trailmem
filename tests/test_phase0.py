@@ -39,15 +39,20 @@ def run() -> None:
     assert "trailmem =" in scripts, "CLI script must stay"
 
     # --- 2. env-pin invariant on every JSON host entry factory ---
-    for name, _detect, _path, _key, entry in integrate.JSON_HOSTS:
-        e = entry(cmd, args)
+    from trailmem import hosts
+    from trailmem.hosts import _util as hu
+
+    json_hosts = [h for h in hosts.HOSTS if h.mcp_entry]
+    assert json_hosts, "at least one JSON host adapter must exercise the shared helper"
+    for h in json_hosts:
+        e = h.mcp_entry(cmd, args)
         envmap = e.get("env") or e.get("environment")
         assert envmap and envmap.get("TRAILMEM_AGENT_TYPE"), \
-            f"{name} entry lost the attribution env pin: {e}"
+            f"{h.name} entry lost the attribution env pin: {e}"
         flat = e["command"] if isinstance(e["command"], list) \
             else [e["command"], *e.get("args", [])]
         assert flat[0] == sys.executable and "trailmem.mcp_server" in flat, \
-            f"{name} does not launch python -m: {flat}"
+            f"{h.name} does not launch python -m: {flat}"
 
     # --- 3. old-launcher upgrade keeps env pin + user env vars ---
     with tempfile.TemporaryDirectory() as td:
@@ -55,8 +60,7 @@ def run() -> None:
         cfg.write_text(json.dumps({"mcpServers": {"trailmem": {
             "command": "/home/u/.local/bin/trailmem-mcp", "args": [],
             "env": {"TRAILMEM_AGENT_TYPE": "kiro", "CUSTOM": "keep"}}}}))
-        msg = integrate._patch_json_map(cfg, "mcpServers",
-                                        integrate._std("kiro")(cmd, args))
+        msg = hu.patch_json_map(cfg, "mcpServers", hu.std_entry("kiro", cmd, args))
         assert "upgraded" in msg, msg
         e = json.loads(cfg.read_text())["mcpServers"]["trailmem"]
         assert e["command"] == sys.executable and e["args"] == args, e
@@ -68,34 +72,96 @@ def run() -> None:
         kcfg.write_text(json.dumps({"mcp": {"trailmem": {
             "type": "local", "command": ["/home/u/.local/bin/trailmem-mcp"],
             "environment": {"TRAILMEM_AGENT_TYPE": "kilo"}}}}))
-        kilo_entry = next(e for n, _, _, _, e in integrate.JSON_HOSTS if n == "Kilo")
-        integrate._patch_json_map(kcfg, "mcp", kilo_entry(cmd, args))
+        hu.patch_json_map(kcfg, "mcp", hosts.kilo.HOST.mcp_entry(cmd, args))
         ke = json.loads(kcfg.read_text())["mcp"]["trailmem"]
         assert ke["command"] == [cmd, *args], ke
         assert "args" not in ke, "stale keys break strict hosts (Kilo)"
         assert ke["environment"]["TRAILMEM_AGENT_TYPE"] == "kilo", ke
 
         # up-to-date entry is untouched
-        msg2 = integrate._patch_json_map(cfg, "mcpServers",
-                                         integrate._std("kiro")(cmd, args))
+        msg2 = hu.patch_json_map(cfg, "mcpServers", hu.std_entry("kiro", cmd, args))
         assert msg2 == "already registered", msg2
 
         # env map present but pin missing → pin gets added (not "already registered")
         cfg3 = Path(td) / "nopin.json"
         cfg3.write_text(json.dumps({"mcpServers": {"trailmem": {
             "command": cmd, "args": args, "env": {"CUSTOM": "x"}}}}))
-        msg3 = integrate._patch_json_map(cfg3, "mcpServers",
-                                         integrate._std("cursor")(cmd, args))
+        msg3 = hu.patch_json_map(cfg3, "mcpServers", hu.std_entry("cursor", cmd, args))
         assert "env" in msg3, msg3
         e3 = json.loads(cfg3.read_text())["mcpServers"]["trailmem"]
         assert e3["env"] == {"CUSTOM": "x", "TRAILMEM_AGENT_TYPE": "cursor"}, e3
+
+        # --- write policy: unverified hosts never touch their config ---
+        real_home = hu._HOME
+        hu._HOME = lambda: Path(td)
+        try:
+            for h in json_hosts:
+                mcp_artifact = next(
+                    artifact for artifact in h.artifacts
+                    if artifact.label == "MCP registration"
+                )
+                msg = mcp_artifact.install(cmd, args)
+                wrote = "not auto-configured" not in msg and "wrote" in msg
+                assert wrote == mcp_artifact.auto_writes_config, \
+                    f"{h.name} write policy violated: {msg}"
+            assert not (Path(td) / ".config" / "zed" / "settings.json").exists(), \
+                "manual-policy host config must not be created"
+
+            # --- Claude statusline artifact: write-if-absent, never clobber ---
+            sl = next(a for a in hosts.claude.HOST.artifacts
+                      if a.label == "statusline")
+            settings = Path(td) / ".claude" / "settings.json"
+            msg = sl.install(cmd, args)
+            assert "wired" in msg, msg
+            written = json.loads(settings.read_text())["statusLine"]
+            assert written["type"] == "command", written
+            assert "-m trailmem statusline --agent claude" in written["command"], written
+            assert sl.install(cmd, args) == "statusline already wired"
+            assert "removed" in sl.remove()
+            assert "statusLine" not in json.loads(settings.read_text())
+            # a user's own statusline is kept on install AND on remove
+            settings.write_text(json.dumps(
+                {"statusLine": {"type": "command", "command": "bash my-line.sh"}}))
+            assert "kept" in sl.install(cmd, args)
+            assert sl.remove() is None
+            assert json.loads(settings.read_text())["statusLine"]["command"] == \
+                "bash my-line.sh", "foreign statusline must survive uninstall"
+
+            # --- doctor checks: drift states on a written JSON host (Kilo) ---
+            kilo_mcp = next(a for a in hosts.kilo.HOST.artifacts
+                            if a.label == "MCP registration")
+            assert kilo_mcp.check() == "registered", kilo_mcp.check()
+            kilo_cfg = Path(td) / ".config" / "kilo" / "kilo.jsonc"
+            data = json.loads(kilo_cfg.read_text())
+            del data["mcp"]["trailmem"]["environment"]["TRAILMEM_AGENT_TYPE"]
+            kilo_cfg.write_text(json.dumps(data))
+            assert "missing TRAILMEM_AGENT_TYPE pin" in kilo_mcp.check()
+            data["mcp"]["trailmem"] = {"command": ["/old/bin/trailmem-mcp"]}
+            kilo_cfg.write_text(json.dumps(data))
+            assert "STALE launcher" in kilo_mcp.check()
+            del data["mcp"]["trailmem"]
+            kilo_cfg.write_text(json.dumps(data))
+            assert kilo_mcp.check() == "not registered"
+
+            # --- Antigravity statusline: same shared artifact, its own path/agent ---
+            ag = next(a for a in hosts.antigravity.HOST.artifacts
+                      if a.label == "statusline")
+            ag_settings = (Path(td) / ".gemini" / "antigravity-cli" / "settings.json")
+            assert "wired" in ag.install(cmd, args)
+            ag_written = json.loads(ag_settings.read_text())["statusLine"]
+            assert "-m trailmem statusline --agent antigravity" in ag_written["command"]
+            assert ag.check() == "wired"
+            assert "removed" in ag.remove()
+            assert ag.check() == "not wired"
+        finally:
+            hu._HOME = real_home
 
     # Codex TOML entry must parse even with Windows backslash paths
     import tomllib
     win_cmd = r"C:\Users\ansh\AppData\uv\tools\trailmem\Scripts\python.exe"
     args_toml = "[" + ", ".join(f"'{a}'" for a in args) + "]"
     block = (f"[mcp_servers.trailmem]\ncommand = '{win_cmd}'\n"
-             f"args = {args_toml}\n{integrate._CODEX_ENV_LINE}\n")
+             f"args = {args_toml}\n{hosts.codex.ENV_LINE}\n")
     parsed = tomllib.loads(block)["mcp_servers"]["trailmem"]
     assert parsed["command"] == win_cmd and parsed["args"] == args
     assert parsed["env"]["TRAILMEM_AGENT_TYPE"] == "codex"
@@ -120,7 +186,7 @@ def run() -> None:
     from trailmem.store import store
     r = store(conn, "FTS-only degrade: store must keep working when onnxruntime "
                     "cannot load on this machine.", "Broken-ORT degrade", "lesson",
-              agent_type="claude")
+              agent_type="claude", code_files="none", doc_files="none")
     assert r["outcome"] == "stored", r
     from trailmem.queries import query
     res = query(conn, "degrade onnxruntime")

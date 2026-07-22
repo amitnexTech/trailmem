@@ -2,13 +2,15 @@
 shape since the trailmem-mcp script was removed) and exercise all 6 tools."""
 
 import asyncio
+import json
 import os
+import sqlite3
 import sys
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-PYTHON = "/home/amit/trailmem/.venv/bin/python"
+PYTHON = sys.executable
 SERVER_ARGS = ["-u", "-m", "trailmem.mcp_server"]
 ENV = {
     **os.environ,
@@ -28,9 +30,9 @@ async def call(sess, tool, **kwargs):
 async def run():
     import shutil
     shutil.rmtree("/tmp/tm-mcp-e2e", ignore_errors=True)
-    os.makedirs("/tmp/tm-mcp-e2e/models", exist_ok=True)
-    # reuse the already-downloaded model
-    shutil.copytree("/tmp/tm-test-home/models/bge-small", "/tmp/tm-mcp-e2e/models/bge-small")
+    os.makedirs("/tmp/tm-mcp-e2e", exist_ok=True)
+    with open("/tmp/tm-mcp-e2e/config.json", "w") as f:
+        json.dump({"embedding": {"enabled": False}}, f)
 
     async with stdio_client(
         StdioServerParameters(command=PYTHON, args=SERVER_ARGS, env=ENV)
@@ -41,11 +43,20 @@ async def run():
             assert tools == {"trailmem_welcome", "trailmem_store", "trailmem_query",
                              "trailmem_show", "trailmem_edit", "trailmem_link"}, tools
 
-            err, w = await call(sess, "trailmem_welcome")
+            err, w = await call(
+                sess, "trailmem_welcome", session_id="explicit-session")
             assert not err and "📊" in w, w
+
+            # code_files/doc_files omitted → error (required since 0.1.8)
+            err, s0 = await call(sess, "trailmem_store",
+                                 title="E2E missing files", event_type="decision",
+                                 content="This store must fail: file fields are required and were not passed.")
+            assert err or "code_files" in s0, s0
 
             err, s1 = await call(sess, "trailmem_store",
                                  title="E2E decision", event_type="decision",
+                                 code_files="none", doc_files="none",
+                                 session_id="explicit-session",
                                  content="Use stdio transport only for v1; HTTP deferred until a team use case exists.")
             assert not err and "Stored #" in s1, s1
             node = s1.split("[")[1].split("]")[0]
@@ -53,12 +64,15 @@ async def run():
             err, s2 = await call(sess, "trailmem_store",
                                  title="E2E constraint", event_type="constraint", pinned=False,
                                  content="Never inject memory content per-turn; welcome once per session is the only injection point.",
+                                 code_files="none", doc_files="none",
+                                 session_id="explicit-session",
                                  link_to=node)
             assert not err and "Stored #" in s2 and "Linked" in s2, s2
 
             # exact dup → business outcome text, NOT protocol error
             err, s3 = await call(sess, "trailmem_store",
                                  title="E2E decision", event_type="decision",
+                                 code_files="none", doc_files="none",
                                  content="Use stdio transport only for v1; HTTP deferred until a team use case exists.")
             assert not err and "Rejected: exact duplicate" in s3, s3
 
@@ -70,13 +84,30 @@ async def run():
 
             err, ed = await call(sess, "trailmem_edit", ref=node, title="E2E decision v2")
             assert not err and "title" in ed, ed
+            err, ed2 = await call(
+                sess, "trailmem_edit", ref=node, title="E2E decision v3",
+                session_id="explicit-session")
+            assert not err and "title" in ed2, ed2
 
             # unknown ref → protocol error (isError=True)
             err, _ = await call(sess, "trailmem_show", ref="mem-nonexist")
             assert err, "unknown ref must be a protocol error"
 
-            err, w2 = await call(sess, "trailmem_welcome")
+            err, w2 = await call(
+                sess, "trailmem_welcome", session_id="explicit-session")
             assert not err and "SINCE" not in w2, "second welcome must be short (anti-bloat)"
+
+    conn = sqlite3.connect(ENV["TRAILMEM_DB"])
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT session_id, write_count FROM sessions ORDER BY session_id"
+    ).fetchall()
+    by_id = {row["session_id"]: row["write_count"] for row in rows}
+    assert by_id["claude:explicit-session"] == 3
+    assert not any(
+        sid.startswith("pid-") or ":pid-" in sid for sid in by_id
+    ), by_id
+    conn.close()
 
     print("MCP E2E OK")
 

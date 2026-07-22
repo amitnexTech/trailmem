@@ -28,9 +28,18 @@ out a parameter; everything an agent needs is here or in the tool docstrings.
 - **agent_type** — OMIT it. Attribution comes from `TRAILMEM_AGENT_TYPE`
   pinned in the host's MCP config entry. Pass it explicitly only if store
   rejects with "agent_type could not be determined".
-- **code_files / doc_files** — fill BOTH when relevant, comma-separated
-  paths: `code_files` = source/config files the memory touches, `doc_files` =
-  docs/spec pages. Don't record only the docs and skip the code files.
+- **session_id** — OMIT it on integrated hosts. For an unsupported host, set
+  `TRAILMEM_SESSION_ID` or pass its stable session ID explicitly. Never use a
+  PID; without a real ID TrailMem intentionally runs stateless.
+- **session_context** — host adapters may inject this versioned object into
+  every TrailMem call. Do not construct or modify it manually. When present it
+  is authoritative for agent, session, and project; legacy identity arguments
+  cannot override it.
+- **code_files / doc_files** — BOTH are REQUIRED, comma-separated paths:
+  `code_files` = source/config files the memory touches, `doc_files` =
+  docs/spec pages. Pass the literal `'none'` when the memory genuinely
+  touches no files of that kind — an omitted field is rejected. List the
+  files you actually edited this session; don't lazily write `'none'`.
 - **content** — English only. 50+ chars. Detailed prose beats terse bullets.
 - **title** — 3–60 chars.
 - **event_type** — required on store:
@@ -39,7 +48,10 @@ out a parameter; everything an agent needs is here or in the tool docstrings.
   - `error_pattern` — things that failed and how they fail
   - `task` — pending work
   - `constraint` — hard rules (auto-surfaced in every welcome — use sparingly)
-  - `user_preference` — personal choices only
+  - `user_preference` — personal choices only. Singleton: exactly one active
+    global record exists — never store a new one, merge into the existing
+    record via `trailmem_edit` (a new store returns `blocked_singleton` with
+    the existing id; `force=true` does not bypass it)
   - `session_summary`, `memory` — summaries / plain facts
 
 ## Dedup responses are not errors
@@ -59,12 +71,16 @@ Every memory should link to at least one related memory. Edge types:
 - Later: `trailmem_link(action='add', source='#new', target='#old',
   edge_type='related')`. Edge ids for removal come from `trailmem_show`.
 
-## Editing & archiving
+## Editing & closing
 
 - `trailmem_edit(ref='#12', content=...)` — content/title/type/pin updates;
   embedding and search index refresh automatically.
-- Archive: `trailmem_edit(ref='#12', status='archived', archive_reason=...)`
-  — reason must be ≥20 chars AND the memory must have at least one edge.
+- Close a finished task the moment its work is done:
+  `trailmem_edit(ref='#12', status='completed', archive_reason='<what
+  happened + evidence>', link_to='#<completion memory>')`. Use `cancelled`
+  for dropped work. Reserve `archived` for wrong/outdated info and
+  `superseded` for replaced info — not for successfully finished tasks.
+- All four statuses need archive_reason ≥20 chars AND at least one edge.
 
 ## Common failures
 

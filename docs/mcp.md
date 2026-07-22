@@ -1,5 +1,9 @@
 # trailmem — MCP Server Specification
 
+Specification of the stdio MCP server: the six tools (welcome/store/query/show/edit/link), the `save_session` prompt, response and error-handling rules, and multi-agent concurrency contracts.
+
+**Status:** REFERENCE
+
 ## Overview
 
 6 MCP tools over stdio transport. All responses = plain text (agent-facing, token-efficient). JSON consumers use the CLI (`trailmem query/list/export --format json`) or the dashboard's own service layer — the MCP tools deliberately ship no format parameter (v1).
@@ -47,6 +51,40 @@ Each tool description = **2-3 lines, fixed structure:**
 
 No inline examples in descriptions. Response format is self-documenting.
 
+### Session identity (all six tools)
+
+Every tool accepts an optional versioned `session_context` object. Integrated
+host adapters resolve native host fields once and inject that canonical
+envelope; MCP and core never reinterpret native env or payload names. When
+present, it is authoritative for agent, external session ID, and project.
+
+The legacy `session_id` parameter remains temporarily supported for generic
+hosts. `TRAILMEM_SESSION_ID` is its environment equivalent. Stored keys are
+namespaced as `<agent>:<external-session-id>`. If no real ID exists, tools
+still work but welcome is stateless and save-awareness is disabled. There is
+no PID fallback.
+
+Deprecation policy: legacy `session_id`/`agent_type` parameters are deprecated
+as of 0.1.8 — they stay accepted (and always lose to a canonical
+`session_context`) throughout 0.x, and will be removed in 1.0.
+
+```json
+{
+  "schema_version": 1,
+  "agent_type": "codex",
+  "session_id": "thread-id",
+  "project": "/abs/project",
+  "event": "tool-context",
+  "source": "codex-adapter"
+}
+```
+
+The canonical envelope is validated before use. `session_id` must be a string
+or null and is capped at 512 characters. `event` is null or one of
+`session-start`, `session-stop`, and `tool-context`; `source` is a lowercase
+slug of at most 80 characters. Invalid canonical input is rejected even where
+missing identity would otherwise permit stateless reads.
+
 ---
 
 ## Tool 1: `trailmem_welcome`
@@ -59,6 +97,8 @@ Session start briefing. Anti-bloat protected.
 | project | string | No | auto from cwd | Project scope filter |
 | agent_type | string | No | auto from env | Identity for boundary query + session tracking |
 | force | boolean | No | false | Bypass anti-bloat, full welcome again |
+| session_id | string | No | null | Legacy generic external session ID |
+| session_context | object | No | adapter | Canonical authoritative context |
 
 **Response (plain text):**
 - First call: Full welcome (7 sections: pinned/last-activity/your-last/since/tasks/action/stats)
@@ -83,32 +123,35 @@ Save new memory with optional linking + supersede in one call.
 |------|------|----------|---------|-------------|
 | title | string | YES | — | 3-60 chars, descriptive label |
 | content | string | YES | — | 50+ chars (soft warn >4000) |
-| event_type | string | YES | — | decision/lesson/error_pattern/task/memory/user_preference/constraint/session_summary |
-| agent_type | string | No | auto from env | kiro/claude/codex/opencode/kilo/antigravity/zed/cursor/windsurf/user |
+| event_type | string | YES | — | decision/lesson/error_pattern/task/memory/user_preference/constraint/session_summary. `user_preference` is a singleton: always forced global, and a second active record is blocked (`blocked_singleton`, `force` does NOT bypass) — edit the existing one instead. |
+| agent_type | string | No | auto from env | Lowercase agent slug |
 | project | string | No | auto from cwd | NULL = global. If supplied, must be an absolute path or `"global"`; a bare name is rejected. |
 | work_type | string | No | null | discussion/file-edit/code-written/bug-fix/research/setup/review |
 | source_uri | string | No | null | Origin reference |
-| code_files | string | No | null | Comma-separated source/config file paths |
-| doc_files | string | No | null | Comma-separated docs/spec page paths |
+| code_files | string | YES | — | Comma-separated source/config file paths, or the literal `'none'` if no code files were touched. Omitting is rejected — "no files" must be explicit, never ambiguous. |
+| doc_files | string | YES | — | Comma-separated docs/spec page paths, or `'none'`. Same required rule as code_files. |
 | pinned | boolean | No | false | Pin this memory |
 | link_to | string/array | No | null | ref(s) to link to (#id or node_id) |
 | edge_type | string | No | "related" | related/derived_from/supersedes/contradicts/evolves |
 | supersedes | string/int | No | null | ref of memory this replaces |
 | archive_reason | string | No | null | REQUIRED when supersedes set (min 20 chars) |
 | force | boolean | No | false | Bypass >0.92 similarity block |
+| session_id | string | No | null | Legacy generic external session ID |
+| session_context | object | No | adapter | Canonical authoritative context |
 
 **Response (plain text):**
 ```
 Success:      "Stored #12 [mem-abc123] 'QTcpSocket Decision'. Linked to #4."
 Exact dup:    "Rejected: exact duplicate of #4 [mem-xyz] 'Title'. Use trailmem_edit(ref=#4)."
 Blocked:      "Blocked: 94% similar to #4 [mem-xyz] 'Title'. trailmem_edit(ref=#4) or force=true."
+Singleton:    "user_preference is a singleton — active record #4 already exists. Use edit(id=4); force=true does not bypass this."
 Warned:       "Stored #12 [mem-abc123]. ⚠ 88% similar to #4 [mem-xyz]. Consider linking."
 Soft warn:    "Stored #12 [mem-abc123]. ⚠ Content 4200 chars — consider docs/ for detail."
 ```
 
 **Processing order:**
 1. Validate title (3-60) + content (50+)
-2. Auto-fill agent_type/project/session_id
+2. Resolve agent/project and normalize the authoritative session key
 3. content_hash + project dup check (exact → reject)
 4. Embedding similarity (>0.92 block, 0.85-0.92 warn) — skip if force=true
 5. INSERT memories + memories_vec + memories_fts (all three, atomic)
@@ -220,8 +263,8 @@ Update existing memory or change its status.
 | title | string | No | — | New title |
 | event_type | string | No | — | Change type |
 | pinned | boolean | No | — | Pin/unpin |
-| status | string | No | — | "archived" or "superseded" |
-| archive_reason | string | No | — | REQUIRED for archive/supersede (min 20 chars) |
+| status | string | No | — | "archived", "superseded", "completed" or "cancelled" — completed/cancelled close finished/dropped tasks; archived is for wrong/outdated info |
+| archive_reason | string | No | — | REQUIRED for any status change (min 20 chars) |
 | link_to | string/array | No | — | Add edges during edit |
 | edge_type | string | No | "related" | Type for new edges |
 
@@ -307,7 +350,7 @@ Hook registration = per-host config (Claude Code settings.json, Kiro .kiro/setti
 
 ---
 
-## Related specs
+## Related
 
 - [[schema]] — tables/contracts these tools read and write.
 - [[welcome]] — the seven-section briefing `trailmem_welcome` renders.

@@ -31,19 +31,27 @@ def run() -> None:
     assert fts is not None
 
     # --- store layer ---
-    from trailmem.store import ValidationError, store
+    from trailmem.store import (
+        ValidationError, resolve_agent, session_id_from_env, session_key, store,
+    )
 
     content = "Use QTcpSocket direct connection for aria2 JSON-RPC instead of WebSocket wrapper."
-    r = store(conn, content, "aria2 via QTcpSocket", "decision", agent_type="claude")
+    r = store(conn, content, "aria2 via QTcpSocket", "decision", agent_type="claude",
+              code_files="none", doc_files="none")
     assert r["outcome"] == "stored" and r["node_id"].startswith("mem-")
+    assert resolve_agent("future-agent") == "future-agent"
+    assert session_id_from_env({"TRAILMEM_SESSION_ID": "portable-1"}) == "portable-1"
+    assert session_key("future-agent", "portable-1") == "future-agent:portable-1"
 
     # exact duplicate in same project → rejected
-    r2 = store(conn, content, "aria2 via QTcpSocket", "decision", agent_type="claude")
+    r2 = store(conn, content, "aria2 via QTcpSocket", "decision", agent_type="claude",
+               code_files="none", doc_files="none")
     assert r2["outcome"] == "rejected_exact" and r2["duplicate"]["id"] == r["id"]
 
     # agent_type undetectable → hard reject (the OMEGA bug fix)
     try:
-        store(conn, content + " v2 variant", "another title", "decision", env={})
+        store(conn, content + " v2 variant", "another title", "decision", env={},
+              code_files="none", doc_files="none")
         raise AssertionError("expected ValidationError for missing agent_type")
     except ValidationError:
         pass
@@ -51,6 +59,7 @@ def run() -> None:
     # constraint → auto-pinned; link_to creates edge
     r3 = store(conn, "NEVER store memory content in non-English text; embedding accuracy depends on it fully.",
                "English-only content", "constraint", agent_type="claude",
+               code_files="none", doc_files="none",
                link_to=r["node_id"], edge_type="related")
     assert r3["outcome"] == "stored" and r3["linked"]["target"] == r["node_id"]
     row = conn.execute("SELECT pinned FROM memories WHERE node_id=?", (r3["node_id"],)).fetchone()
@@ -60,10 +69,12 @@ def run() -> None:
     from trailmem import embeddings
     if embeddings.available():
         paraphrase = "Use QTcpSocket direct connection for aria2 JSON-RPC rather than a WebSocket wrapper."
-        rp = store(conn, paraphrase, "aria2 paraphrase", "decision", agent_type="claude")
+        rp = store(conn, paraphrase, "aria2 paraphrase", "decision", agent_type="claude",
+                   code_files="none", doc_files="none")
         assert rp["outcome"] == "blocked_near_dup", f"paraphrase should hit band 2: {rp}"
         assert rp["duplicate"]["id"] == r["id"]
-        rf = store(conn, paraphrase, "aria2 paraphrase", "decision", agent_type="claude", force=True)
+        rf = store(conn, paraphrase, "aria2 paraphrase", "decision", agent_type="claude",
+                   code_files="none", doc_files="none", force=True)
         assert rf["outcome"] == "stored", "force must bypass the block"
         assert rf.get("related_candidates"), "store-time link assistance must surface candidates"
         conn.execute("DELETE FROM memories WHERE node_id=?", (rf["node_id"],))
@@ -81,6 +92,20 @@ def run() -> None:
         raise AssertionError("expected ValidationError for short title")
     except ValidationError:
         pass
+
+    # code_files/doc_files are required: omitted → reject; 'none' → NULL;
+    # real paths stored verbatim (empty field must never mean "forgot")
+    try:
+        store(conn, content + " v4 files", "files required", "decision", agent_type="claude")
+        raise AssertionError("expected ValidationError for missing code_files")
+    except ValidationError:
+        pass
+    r_files = store(conn, "File-field discipline: paths recorded, 'none' normalised to NULL.",
+                    "file fields check", "decision", agent_type="claude",
+                    code_files="trailmem/store.py", doc_files="none")
+    row_f = conn.execute("SELECT code_files, doc_files FROM memories WHERE node_id=?",
+                         (r_files["node_id"],)).fetchone()
+    assert row_f["code_files"] == "trailmem/store.py" and row_f["doc_files"] is None
 
     # --- query / show ---
     from trailmem.queries import format_query_results, format_show, query, show
@@ -101,25 +126,32 @@ def run() -> None:
     # --- sessions / welcome ---
     from trailmem.sessions import register_session, welcome
 
-    register_session(conn, "sess-A", "claude", os.getcwd())
-    row = conn.execute("SELECT started_at, last_welcome_at FROM sessions WHERE session_id='sess-A'").fetchone()
+    register_session(conn, "claude:sess-A", "claude", os.getcwd())
+    row = conn.execute(
+        "SELECT started_at, last_welcome_at FROM sessions "
+        "WHERE session_id='claude:sess-A'"
+    ).fetchone()
     assert row["last_welcome_at"] is None, "lazy register must NOT set last_welcome_at"
 
-    w1 = welcome(conn, "sess-A", "claude", os.getcwd())
+    w1 = welcome(conn, "claude:sess-A", "claude", os.getcwd())
     assert "PINNED" in w1 and "📊" in w1, w1
     assert "English-only content" in w1, "constraint must appear full in welcome"
-    w2 = welcome(conn, "sess-A", "claude", os.getcwd())
+    w2 = welcome(conn, "claude:sess-A", "claude", os.getcwd())
     assert "SINCE" not in w2 and "RECENT" not in w2, "2nd welcome must be short"
     assert "PINNED" in w2, "short welcome still shows pinned"
-    w3 = welcome(conn, "sess-A", "claude", os.getcwd(), force=True)
+    w3 = welcome(conn, "claude:sess-A", "claude", os.getcwd(), force=True)
     assert len(w3) >= len(w2), "force must give full welcome"
     # boundary: second session sees sess-A's started_at as boundary
-    w4 = welcome(conn, "sess-B", "claude", os.getcwd())
+    w4 = welcome(conn, "claude:sess-B", "claude", os.getcwd())
     assert "First session" not in w4 or "SINCE" in w4 or True  # boundary path exercised
     # started_at immutable on re-register
-    before = conn.execute("SELECT started_at FROM sessions WHERE session_id='sess-A'").fetchone()[0]
-    register_session(conn, "sess-A", "claude", os.getcwd())
-    after = conn.execute("SELECT started_at FROM sessions WHERE session_id='sess-A'").fetchone()[0]
+    before = conn.execute(
+        "SELECT started_at FROM sessions WHERE session_id='claude:sess-A'"
+    ).fetchone()[0]
+    register_session(conn, "claude:sess-A", "claude", os.getcwd())
+    after = conn.execute(
+        "SELECT started_at FROM sessions WHERE session_id='claude:sess-A'"
+    ).fetchone()[0]
     assert before == after, "started_at must never be clobbered"
     # welcome must not touch access_count
     ac2 = conn.execute("SELECT access_count FROM memories WHERE node_id=?", (r["node_id"],)).fetchone()[0]
@@ -142,9 +174,98 @@ def run() -> None:
     assert row2["content_hash"] == _h.sha256(new_content.encode()).hexdigest()
     assert row2["updated_at"] is not None
 
+    # Session save accounting counts successful create/edit, not duplicates or no-ops.
+    portable_sid = "future-agent:portable-1"
+    portable_project = "/tmp/future-agent-project"
+    register_session(conn, portable_sid, "future-agent", portable_project)
+    portable = store(
+        conn,
+        "A future MCP host can use the generic agent slug and portable session id contract.",
+        "portable host contract",
+        "decision",
+        agent_type="future-agent",
+        project=portable_project,
+        session_id="portable-1",
+        code_files="none",
+        doc_files="none",
+    )
+    assert portable["outcome"] == "stored"
+    count = conn.execute(
+        "SELECT write_count FROM sessions WHERE session_id = ?", (portable_sid,)
+    ).fetchone()[0]
+    assert count == 1
+    duplicate = store(
+        conn,
+        "A future MCP host can use the generic agent slug and portable session id contract.",
+        "portable host contract",
+        "decision",
+        agent_type="future-agent",
+        project=portable_project,
+        session_id="portable-1",
+        code_files="none",
+        doc_files="none",
+    )
+    assert duplicate["outcome"] == "rejected_exact"
+    assert conn.execute(
+        "SELECT write_count FROM sessions WHERE session_id = ?", (portable_sid,)
+    ).fetchone()[0] == 1
+    edit(conn, portable["id"], title="portable host identity", session_id=portable_sid)
+    assert conn.execute(
+        "SELECT write_count FROM sessions WHERE session_id = ?", (portable_sid,)
+    ).fetchone()[0] == 2
+    edit(conn, portable["id"], session_id=portable_sid)
+    assert conn.execute(
+        "SELECT write_count FROM sessions WHERE session_id = ?", (portable_sid,)
+    ).fetchone()[0] == 2
+
+    # Only the immediately previous same-agent + same-project session can warn.
+    warning_project = "/tmp/warning-project"
+    register_session(conn, "codex:old-zero", "codex", warning_project)
+    register_session(conn, "codex:recent-write", "codex", warning_project)
+    conn.execute(
+        "UPDATE sessions SET started_at='2026-01-01T00:00:00+00:00', write_count=0 "
+        "WHERE session_id='codex:old-zero'"
+    )
+    conn.execute(
+        "UPDATE sessions SET started_at='2026-01-02T00:00:00+00:00', write_count=1 "
+        "WHERE session_id='codex:recent-write'"
+    )
+    register_session(conn, "codex:other-project-zero", "codex", "/tmp/other-project")
+    conn.execute(
+        "UPDATE sessions SET started_at='2026-01-03T00:00:00+00:00', write_count=0 "
+        "WHERE session_id='codex:other-project-zero'"
+    )
+    conn.commit()
+    no_sticky_warning = welcome(
+        conn, "codex:current", "codex", warning_project, force=True)
+    assert "LAST SESSION SAVED 0" not in no_sticky_warning
+    conn.execute(
+        "UPDATE sessions SET started_at='2026-01-04T00:00:00+00:00', write_count=0 "
+        "WHERE session_id='codex:current'"
+    )
+    conn.commit()
+    warning = welcome(conn, "codex:next", "codex", warning_project, force=True)
+    assert "LAST SESSION SAVED 0" in warning
+
+    # Historical PID/CLI/adhoc fallback rows never participate in boundaries.
+    register_session(conn, "pid-123", "codex", warning_project)
+    register_session(conn, "codex:adhoc-456", "codex", warning_project)
+    conn.execute(
+        "UPDATE sessions SET started_at='2099-01-01T00:00:00+00:00', write_count=0 "
+        "WHERE session_id IN ('pid-123', 'codex:adhoc-456')"
+    )
+    conn.execute(
+        "UPDATE sessions SET write_count=1 WHERE session_id='codex:next'"
+    )
+    conn.commit()
+    fake_ignored = welcome(
+        conn, "codex:after-fakes", "codex", warning_project, force=True)
+    assert "LAST SESSION SAVED 0" not in fake_ignored
+
     # archive without reason → reject; with reason but orphan → reject
     r4 = store(conn, "Qt WebSocket approach failed for aria2 under sustained load, protocol mismatch issues.",
-               "Qt WebSocket failed", "lesson", agent_type="claude")
+               "Qt WebSocket failed", "lesson", agent_type="claude",
+               code_files="none", doc_files="none")
     try:
         edit(conn, r4["id"], status="archived", archive_reason="too short")
         raise AssertionError("expected reject: short archive_reason")
@@ -162,6 +283,32 @@ def run() -> None:
     assert la2["duplicate"], "same edge twice must report duplicate"
     e3 = edit(conn, r4["id"], status="archived", archive_reason="replaced by QTcpSocket approach entirely")
     assert "archived" in e3["changed"]
+
+    # task closure: 'completed' follows the same reason+edge discipline as archive
+    r5 = store(conn, "Track the aria2 migration task until QTcpSocket rollout is confirmed in production.",
+               "aria2 migration task", "task", agent_type="claude",
+               code_files="none", doc_files="none")
+    try:
+        edit(conn, r5["id"], status="completed", archive_reason="rolled out, verified in production logs")
+        raise AssertionError("expected reject: completed with zero edges")
+    except ValidationError:
+        pass
+    e4 = edit(conn, r5["id"], status="completed",
+              archive_reason="rolled out, verified in production logs", link_to=r["id"])
+    assert "completed" in e4["changed"]
+
+    # user_preference singleton: always global, second active record blocked, force no bypass
+    p1 = store(conn, "Amit prefers concise replies in Roman Hinglish with no filler words at all.",
+               "singleton pref one", "user_preference", agent_type="claude",
+               project="/tmp/should-be-ignored", code_files="none", doc_files="none")
+    assert p1["outcome"] == "stored"
+    assert conn.execute("SELECT project FROM memories WHERE node_id=?",
+                        (p1["node_id"],)).fetchone()[0] is None
+    p2 = store(conn, "A completely different preference record that should nonetheless be blocked outright.",
+               "singleton pref two", "user_preference", agent_type="claude",
+               force=True, code_files="none", doc_files="none")
+    assert p2["outcome"] == "blocked_singleton"
+    assert p2["duplicate"]["id"] == p1["id"]
 
     # remove link → orphan warning fires for r4
     lr = link_remove(conn, la["edge_id"])
@@ -182,11 +329,17 @@ def run() -> None:
             code = main(list(argv))
         return code, buf.getvalue()
 
+    # missing --code-files/--doc-files → validation reject (required since 0.1.8)
     code, out = cli("store", "CLI smoke memory content, long enough to pass the fifty char validation floor.",
                     "--title", "CLI smoke entry", "--type", "task")
+    assert code != 0 and "Stored #" not in out, out
+    code, out = cli("store", "CLI smoke memory content, long enough to pass the fifty char validation floor.",
+                    "--title", "CLI smoke entry", "--type", "task",
+                    "--code-files", "none", "--doc-files", "none")
     assert code == 0 and "Stored #" in out, out
     code, out = cli("store", "CLI smoke memory content, long enough to pass the fifty char validation floor.",
-                    "--title", "CLI smoke entry", "--type", "task")
+                    "--title", "CLI smoke entry", "--type", "task",
+                    "--code-files", "none", "--doc-files", "none")
     assert code == 3, "exact dup must exit 3"
     code, out = cli("list", "--tasks")
     assert code == 0 and "CLI smoke entry" in out

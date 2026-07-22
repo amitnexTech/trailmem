@@ -25,6 +25,7 @@ def edit(
     archive_reason: str | None = None,
     link_to=None,
     edge_type: str = "related",
+    session_id: str | None = None,
 ) -> dict:
     m = resolve_ref(conn, ref)
     if not m:
@@ -33,13 +34,16 @@ def edit(
     changed = []
 
     if status is not None:
-        if status not in ("archived", "superseded"):
-            raise ValidationError("status must be 'archived' or 'superseded'")
+        if status not in ("archived", "superseded", "completed", "cancelled"):
+            raise ValidationError(
+                "status must be 'archived', 'superseded', 'completed' or 'cancelled'")
         if not archive_reason or len(archive_reason) < 20:
-            raise ValidationError("Cannot archive: archive_reason required (min 20 chars).")
+            raise ValidationError(
+                f"Cannot close as {status}: archive_reason required (min 20 chars).")
         if edge_count(conn, node_id) == 0 and not link_to:
             raise ValidationError(
-                "Cannot archive: no edges exist. Link to related memory first (link or link_to=)."
+                f"Cannot close as {status}: no edges exist. "
+                "Link to related memory first (link or link_to=)."
             )
 
     if title is not None:
@@ -100,7 +104,14 @@ def edit(
         changed.append(status)
 
     if changed or linked:
-        conn.execute("UPDATE memories SET updated_at = ? WHERE node_id = ?", (now(), node_id))
+        ts = now()
+        conn.execute("UPDATE memories SET updated_at = ? WHERE node_id = ?", (ts, node_id))
+        if session_id:
+            conn.execute(
+                "UPDATE sessions SET write_count = COALESCE(write_count, 0) + 1, "
+                "last_write_at = ?, last_seen_at = ? WHERE session_id = ?",
+                (ts, ts, session_id),
+            )
     conn.commit()
     return {"id": m["id"], "node_id": node_id, "title": title or m["title"],
             "changed": changed, "linked": linked}

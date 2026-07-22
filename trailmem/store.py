@@ -13,6 +13,13 @@ from datetime import datetime, timezone
 
 from . import embeddings
 from .config import load_config
+from .errors import ValidationError
+from .identity import (
+    SessionContext,
+    resolve_agent,
+    resolve_project,
+    session_key,
+)
 from .schema import has_vec
 
 EVENT_TYPES = {
@@ -20,15 +27,9 @@ EVENT_TYPES = {
     "memory", "user_preference", "constraint", "session_summary",
 }
 WORK_TYPES = {"discussion", "file-edit", "code-written", "bug-fix", "research", "setup", "review"}
-AGENT_TYPES = {"kiro", "claude", "codex", "opencode", "kilo", "antigravity",
-               "zed", "cursor", "windsurf", "user"}
 EDGE_TYPES = {"related", "derived_from", "supersedes", "contradicts", "evolves"}
 
 _STOPWORDS = {"the", "is", "of", "and", "to", "a", "in", "for", "on", "with", "it", "this", "that"}
-
-
-class ValidationError(Exception):
-    pass
 
 
 def now() -> str:
@@ -48,38 +49,15 @@ def fmt_local(ts: str | None, *, date_only: bool = False) -> str:
         return dt.strftime("%Y-%m-%d")
     return dt.strftime("%Y-%m-%d %H:%M %Z")
 
-
-
-def detect_agent(env=os.environ) -> str | None:
-    # Claude check is LAST: Claude-fork hosts (Antigravity) mimic CLAUDE_* vars,
-    # so a host-specific var must win over the widely-copied Claude ones.
-    if env.get("TRAILMEM_AGENT_TYPE"):
-        return env["TRAILMEM_AGENT_TYPE"]
-    if env.get("KIRO_SESSION_ID"):
-        return "kiro"
-    if env.get("ANTIGRAVITY_CONVERSATION_ID"):
-        return "antigravity"
-    if env.get("CODEX_THREAD_ID"):
-        return "codex"
-    if env.get("KILO_RUN_ID") or env.get("KILO") or env.get("KILOCODE_VERSION"):
-        return "kilo"
-    if env.get("CLAUDE_CODE_SESSION_ID") or env.get("CLAUDECODE"):
-        return "claude"
-    return None
-
-
-# Host session-id env vars, in priority order (host-specific before Claude —
-# Claude-fork hosts mimic CLAUDE_* vars). One list so every call site
-# (MCP server, CLI, statusline, store) reads the same set — no drift.
-_SESSION_ENV = ("KIRO_SESSION_ID", "ANTIGRAVITY_CONVERSATION_ID",
-                "CODEX_THREAD_ID", "KILO_RUN_ID", "CLAUDE_CODE_SESSION_ID")
-
-
 def session_id_from_env(env=os.environ) -> str | None:
-    for key in _SESSION_ENV:
-        if env.get(key):
-            return env[key]
-    return None
+    """Backward-compatible generic env helper; native envs belong to adapters."""
+    return env.get("TRAILMEM_SESSION_ID")
+
+
+def session_id_from_payload(payload: dict) -> str | None:
+    """Backward-compatible canonical payload helper."""
+    value = payload.get("session_id") if isinstance(payload, dict) else None
+    return str(value) if value else None
 
 
 def english_warning(content: str) -> str | None:
@@ -113,36 +91,17 @@ def validate(title: str, content: str, event_type: str, work_type: str | None) -
     return warnings
 
 
-def resolve_agent(agent_type: str | None, env=os.environ) -> str:
-    agent = agent_type or detect_agent(env)
-    if agent in ("human", "me"):
-        agent = "user"
-    if not agent:
+def resolve_files(value: str | None, field: str) -> str | None:
+    """code_files/doc_files are required: comma-separated paths, or the literal
+    'none' (normalised to NULL) when nothing of that kind was touched. Missing
+    is rejected — half the DB had empty file fields because agents skipped the
+    optional param, making "no files" indistinguishable from "forgot"."""
+    v = (value or "").strip()
+    if not v:
         raise ValidationError(
-            "agent_type could not be determined (no param, no TRAILMEM_AGENT_TYPE, "
-            "no known session env var). Pass agent_type explicitly. Refusing to store unattributed."
-        )
-    if agent not in AGENT_TYPES:
-        raise ValidationError(f"agent_type must be one of {sorted(AGENT_TYPES)}")
-    return agent
-
-
-def resolve_project(project: str | None, env=os.environ) -> str | None:
-    """Resolve project scope. The literal "global" (param or TRAILMEM_PROJECT)
-    maps to NULL = cross-project global scope; otherwise param > env > cwd.
-
-    An explicitly supplied project (param or TRAILMEM_PROJECT) must be either
-    "global" or an absolute path — a bare name like "jarvis_build" is rejected,
-    because it silently splits a project's memories from its cwd-derived
-    absolute-path form. Omit the argument to auto-fill from cwd instead."""
-    explicit = project or env.get("TRAILMEM_PROJECT")
-    if explicit is not None and explicit != "global" and not os.path.isabs(explicit):
-        raise ValidationError(
-            f"project must be an absolute path or 'global', got {explicit!r}. "
-            "Omit it to use the current directory, or pass the full path.")
-    resolved = explicit or os.getcwd()
-    return None if resolved == "global" else resolved
-
+            f"{field} is required — pass comma-separated file paths, or 'none' "
+            f"if this memory touches no {field.replace('_files', '')} files.")
+    return None if v.lower() == "none" else v
 
 
 def _similar(conn: sqlite3.Connection, vec, limit: int = 3) -> list[dict]:
@@ -182,12 +141,38 @@ def store(
     link_to: str | None = None,
     edge_type: str | None = None,
     force: bool = False,
+    context: SessionContext | None = None,
     env=os.environ,
 ) -> dict:
     warnings = validate(title, content, event_type, work_type)
-    agent = resolve_agent(agent_type, env)
-    project = resolve_project(project, env)
-    session_id = session_id or session_id_from_env(env)
+    code_files = resolve_files(code_files, "code_files")
+    doc_files = resolve_files(doc_files, "doc_files")
+    agent = context.agent_type if context else resolve_agent(agent_type, env)
+    if context:
+        project = context.project
+    else:
+        project = resolve_project(project, env)
+    session_id = context.key if context else session_key(
+        agent, session_id or session_id_from_env(env))
+    if event_type == "user_preference":
+        # Singleton: always global, exactly one active record. Architectural
+        # rule — force=true does not bypass it (unlike similarity dedup).
+        project = None
+        existing = conn.execute(
+            "SELECT id, node_id, title FROM memories WHERE event_type = 'user_preference' "
+            "AND status = 'active' AND project IS NULL",
+        ).fetchone()
+        if existing:
+            return {
+                "outcome": "blocked_singleton",
+                "duplicate": {"id": existing["id"], "node_id": existing["node_id"],
+                              "title": existing["title"]},
+                "message": f"user_preference is a singleton — active record "
+                           f"#{existing['id']} [{existing['node_id']}] "
+                           f"'{existing['title']}' already exists. "
+                           f"Use edit(id={existing['id']}) to merge into it; "
+                           f"force=true does not bypass this.",
+            }
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     cfg = load_config()["embedding"]
 
@@ -280,5 +265,11 @@ def store(
         if not candidates and not link_to:
             warnings.append("No related memories found — this is an orphan. Link it or confirm it is standalone.")
 
+    if session_id:
+        conn.execute(
+            "UPDATE sessions SET write_count = COALESCE(write_count, 0) + 1, "
+            "last_write_at = ?, last_seen_at = ? WHERE session_id = ?",
+            (ts, ts, session_id),
+        )
     conn.commit()
     return result

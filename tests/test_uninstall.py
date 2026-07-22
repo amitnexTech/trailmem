@@ -40,6 +40,14 @@ def _fake_home() -> Path:
     kiro.parent.mkdir(parents=True)
     kiro.write_text(json.dumps(
         {"mcpServers": {"trailmem": entry, "other-server": {"command": "keep-me"}}}))
+    kiro_hook = home / ".kiro" / "hooks" / "trailmem-session-start.json"
+    kiro_hook.parent.mkdir(parents=True)
+    kiro_hook.write_text(json.dumps({
+        "version": "v1",
+        "hooks": [{"name": "Trailmem Session Start Briefing", "trigger": "SessionStart",
+                  "action": {"type": "command",
+                             "command": f'"{sys.executable}" -m trailmem hook session-start --agent kiro',
+                             "timeout": 15}}]}))
     kilo = home / ".config" / "kilo" / "kilo.jsonc"
     kilo.parent.mkdir(parents=True)
     kilo.write_text(json.dumps({
@@ -70,12 +78,14 @@ def _fake_home() -> Path:
 
 def run() -> None:
     from trailmem import integrate
+    from trailmem.hosts import _util, claude
 
     home = _fake_home()
-    real_home, real_stdin, real_input = integrate._HOME, sys.stdin, builtins.input
-    integrate._HOME = lambda: home
+    real_home, real_stdin, real_input = _util._HOME, sys.stdin, builtins.input
+    real_claude_remove = claude._mcp_remove
+    _util._HOME = lambda: home
     # No live `claude` CLI in this sandbox home — helper is a no-op stand-in.
-    integrate._claude_remove = lambda: None
+    claude._mcp_remove = lambda: None
     sys.stdin = _TtyStdin()
     try:
         # --- helper invariants first ---
@@ -83,7 +93,7 @@ def run() -> None:
         jsonc = home / "broken.jsonc"
         jsonc.write_text('{"mcp": {/* comment */ "trailmem": {}}}')
         try:
-            integrate._remove_json_map(jsonc, "mcp")
+            _util.remove_json_map(jsonc, "mcp")
             raise AssertionError("JSONC must raise, not rewrite")
         except RuntimeError as exc:
             assert "manually" in str(exc)
@@ -91,8 +101,8 @@ def run() -> None:
         jsonc.unlink()
 
         # nothing-of-ours cases return None
-        assert integrate._remove_json_map(home / "absent.json", "mcpServers") is None
-        assert integrate._remove_skill("Kilo") is None  # dir never created
+        assert _util.remove_json_map(home / "absent.json", "mcpServers") is None
+        assert _util.remove_skill(home / ".config" / "kilo" / "skills") is None  # never created
         assert "uninstall" in integrate._package_removal_cmd()
 
         # --- full uninstall, default (no purge) ---
@@ -104,6 +114,8 @@ def run() -> None:
         assert "trailmem" not in kiro["mcpServers"]
         assert kiro["mcpServers"]["other-server"]["command"] == "keep-me", \
             "surgical removal must keep other servers"
+        assert not (home / ".kiro" / "hooks" / "trailmem-session-start.json").exists(), \
+            "SessionStart hook file must be removed"
         kilo = json.loads((home / ".config" / "kilo" / "kilo.jsonc").read_text())
         assert "trailmem" not in kilo["mcp"] and kilo["theme"] == "dark"
         codex = tomllib.loads((home / ".codex" / "config.toml").read_text())
@@ -135,7 +147,8 @@ def run() -> None:
         assert integrate.uninstall(purge=True) == 0
         assert not (home / ".trailmem").exists(), "--purge must delete the DB dir"
     finally:
-        integrate._HOME, sys.stdin, builtins.input = real_home, real_stdin, real_input
+        _util._HOME, sys.stdin, builtins.input = real_home, real_stdin, real_input
+        claude._mcp_remove = real_claude_remove
 
     print("UNINSTALL OK")
 

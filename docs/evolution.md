@@ -1,5 +1,9 @@
 # trailmem — Knowledge Evolution
 
+How knowledge changes over time without losing history: edit vs supersede vs archive, the `supersedes`/`evolves` distinction, and how archived knowledge stays searchable.
+
+**Status:** REFERENCE
+
 ## Principle
 
 Never lose history. Every change to knowledge leaves a trail. Agent can trace why any decision was made, what was tried before, and what failed.
@@ -127,7 +131,7 @@ All statuses searchable — archived/superseded = "negative knowledge" (what NOT
 
 ---
 
-## Related specs
+## Related
 
 - [[schema]] — `status`, `archive_reason`, `edges` table, and the `supersedes`-edge derivation of `superseded_by`.
 - [[dedup]] — near-duplicate outcomes that trigger a supersede instead of a new record.

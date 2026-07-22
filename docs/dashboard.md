@@ -1,6 +1,10 @@
 # trailmem — Dashboard Specification
 
-**Status: built (2026-07-17), REVIEWED + HARDENED (2026-07-17, commit 4d862c6).** An initial `trailmem/dashboard.py` exists (authored by Amit, wired into cli.py). Audit + fresh-install functional test PASS: loopback-only bind, shared store/ops service layer (no direct SQLite writes), zero CDN/external assets, trigger-based revisioned SSE with Last-Event-ID replay + reset-on-gap, core validation on all write flows, no hard-delete in UI. Hardening added during review: Host/Origin loopback validation on every request (blocks DNS rebinding + cross-site CSRF), scope check on edge removal, clean port-in-use error. The dashboard is a first-party local feature, not a replacement for the six stdio MCP tools.
+Design contract for the local-first `trailmem dashboard` web UI: loopback-only boundary, quiet SSE live-update rules, graph/list/inspector experience, write flows, and acceptance criteria.
+
+**Status:** REFERENCE
+
+**Build note: built (2026-07-17), REVIEWED + HARDENED (2026-07-17, commit 4d862c6).** An initial `trailmem/dashboard.py` exists (authored by Amit, wired into cli.py). Audit + fresh-install functional test PASS: loopback-only bind, shared store/ops service layer (no direct SQLite writes), zero CDN/external assets, trigger-based revisioned SSE with Last-Event-ID replay + reset-on-gap, core validation on all write flows, no hard-delete in UI. Hardening added during review: Host/Origin loopback validation on every request (blocks DNS rebinding + cross-site CSRF), scope check on edge removal, clean port-in-use error. The dashboard is a first-party local feature, not a replacement for the six stdio MCP tools.
 
 ## Product Goal
 
@@ -85,8 +89,10 @@ The inspector is the reading surface, not a cramped card list. Use comfortable l
 
 ### Graph behavior
 
-- Node color encodes type; shape, border, or badge distinguishes pinned/constraint, project/global scope, and archived/superseded status. Do not rely on color alone. In `all` scope, a per-project accent color additionally distinguishes which project each node belongs to.
-- Edge styling differentiates relationship type and direction. Hover/focus reveals its reason/metadata.
+- Node color encodes CLUSTER membership (graphify-style, 2026-07-20): a client-side label-propagation pass groups linked memories into communities, each painted one colour from the Tableau-10 palette (largest cluster first; colours stay stable across live patches because propagation is re-seeded from prior assignments). Memory type stays visible via the inspector/list and node tooltip; pinned/orphan/archived keep their non-colour markers (ring, dashed stroke, opacity). In `all` scope the per-project accent remains on the focus/neighbor stroke. The legend lists the top clusters labelled by each cluster's hub (highest-degree member) with member count.
+- Node size scales with degree (link count) normalised to the current graph's max — hubs read as anchors, like graphify's degree-sized dots. Hub nodes (degree ≥ half of max) keep their label visible in auto mode.
+- Edges are gently curved paths that inherit the SOURCE node's cluster colour (graphify tints edges to blend into their cluster) with a single neutral small arrowhead (`context-stroke`, so the head always matches its line). Relationship type is encoded by dash pattern, not colour: solid = related, long-dash = supersedes, dotted = derived_from, dash-dot = evolves; contradicts stays red + dashed as the one deliberate colour exception. Hover/focus reveals type and reason.
+- Layout is cluster-organised (2026-07-20, graphify-viewer inspired): each connected component settles in its own packed circular territory — largest cluster central, smaller ones around it, orphans on the rim — via ForceAtlas2-flavoured client-side physics (degree-weighted repulsion, collision padding, spring links, gravity toward the cluster's own centre instead of one global centre). The simulation freezes after stabilising; no CDN graph library is used (offline rule above).
 - New nodes appear without restarting the force simulation or moving existing nodes. Changed nodes preserve coordinates.
 - Provide an explicit **Re-layout graph** action with a confirmation/explanation. Automatic re-layout is prohibited.
 - The graph is an exploration aid, not the only way to work: an accessible list/inspector route remains fully usable without it.
@@ -140,3 +146,13 @@ Before dashboard release, demonstrate that:
 5. Every visible relationship is keyboard-accessible and clickable to its connected memory.
 6. The dashboard works offline with no third-party runtime requests.
 7. Graph-disabled or assistive-technology users can search, inspect, and maintain memories through the list/inspector workflow.
+
+---
+
+## Related
+
+- [[schema]] — store/ops service-layer contracts and the dashboard support tables/triggers behind the SSE feed.
+- [[dedup]] — duplicate/near-duplicate outcomes surfaced in the create form.
+- [[evolution]] — archive/supersede rules the write flows enforce and render.
+- [[cli]] — `trailmem dashboard` command, flags, and scope options.
+- [[mcp]] — the stdio tool surface the dashboard complements (never replaces).

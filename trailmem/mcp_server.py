@@ -12,7 +12,7 @@ import sqlite3
 
 from mcp.server.fastmcp import FastMCP
 
-from . import console, ops, queries, sessions, store as store_mod
+from . import console, hosts, ops, queries, sessions, store as store_mod
 from .schema import connect, init_db
 from .store import ValidationError
 
@@ -24,8 +24,9 @@ _INSTRUCTIONS = (
     "trailmem_welcome once — never twice. Before the session ends, store its durable "
     "decisions/lessons/tasks with trailmem_store (English content). Parameter rules: "
     "omit `project` to auto-scope to the current working directory, pass 'global' for "
-    "cross-project memories; omit `agent_type` (auto-detected). If a call fails or "
-    "usage is unclear, consult the 'trailmem' skill if installed."
+    "cross-project memories; omit `agent_type` (auto-detected); `code_files` and "
+    "`doc_files` are required — list the files this memory touches, or pass 'none'. "
+    "If a call fails or usage is unclear, consult the 'trailmem' skill if installed."
 )
 
 mcp = FastMCP("trailmem", instructions=_INSTRUCTIONS)
@@ -59,32 +60,51 @@ def _tx_safe(fn):
     return wrapper
 
 
-def _session_ctx(agent_type=None, project=None, required=True):
-    """Resolve identity + lazily register the session (never sets last_welcome_at).
-
-    required=False (read-style ops): an undetectable agent skips registration
-    instead of raising — the no-unattributed-memory rule guards STORED memories,
-    not reads, and hard-failing every tool made trailmem unusable on hosts
-    without a session env var (Kilo/Codex before env injection)."""
-    proj = store_mod.resolve_project(project)
-    try:
-        agent = store_mod.resolve_agent(agent_type)
-    except ValidationError:
-        if required:
-            raise
-        return None, None, proj
-    sid = store_mod.session_id_from_env() or f"pid-{os.getppid()}"
-    sessions.register_session(_db(), sid, agent, proj)
-    return sid, agent, proj
+def _session_ctx(
+    agent_type=None,
+    project=None,
+    session_id=None,
+    session_context=None,
+    required=True,
+):
+    """Resolve one canonical context and register exactly that session."""
+    pinned_agent = os.environ.get("TRAILMEM_AGENT_TYPE")
+    if pinned_agent and agent_type and agent_type != pinned_agent:
+        raise ValidationError(
+            f"agent_type {agent_type!r} conflicts with MCP host "
+            f"{pinned_agent!r}")
+    context = hosts.resolve_context(
+        agent_type=pinned_agent or agent_type,
+        canonical=session_context,
+        session_id=session_id,
+        project=project if session_context is None else None,
+        required=required,
+    )
+    proj = context.project if context else store_mod.resolve_project(project)
+    if context and context.key:
+        sessions.register_session(
+            _db(), context.key, context.agent_type, context.project)
+    return context, proj
 
 
 @mcp.tool()
 @_tx_safe
-def trailmem_welcome(project: str = None, agent_type: str = None, force: bool = False) -> str:
+def trailmem_welcome(
+    project: str = None,
+    agent_type: str = None,
+    force: bool = False,
+    session_id: str = None,
+    session_context: dict = None,
+) -> str:
     """Session-start briefing: pinned rules, recent activity, open tasks, stats.
     Call once at session start; repeat calls return the short form unless force=true."""
-    sid, agent, proj = _session_ctx(agent_type, project)
-    return sessions.welcome(_db(), sid, agent, proj, force=force)
+    context, proj = _session_ctx(
+        agent_type, project, session_id, session_context)
+    if not context.key:
+        return sessions.stateless_welcome(
+            _db(), context.agent_type, proj)
+    return sessions.welcome(
+        _db(), context.key, context.agent_type, proj, force=force)
 
 
 @mcp.tool()
@@ -93,32 +113,36 @@ def trailmem_store(
     title: str,
     content: str,
     event_type: str,
+    code_files: str,
+    doc_files: str,
     agent_type: str = None,
     project: str = None,
     work_type: str = None,
     source_uri: str = None,
-    code_files: str = None,
-    doc_files: str = None,
     pinned: bool = False,
     link_to: str = None,
     edge_type: str = "related",
     supersedes: str = None,
     archive_reason: str = None,
     force: bool = False,
+    session_id: str = None,
+    session_context: dict = None,
 ) -> str:
     """Save a new memory (decision/lesson/task/constraint/...) with optional linking.
     Store the ENGLISH version of the content; title 3-60 chars, content 50+ chars.
-    Record BOTH file kinds when relevant: code_files = source/config files this
-    memory touches, doc_files = docs/spec pages (comma-separated paths).
+    code_files and doc_files are REQUIRED: comma-separated paths (code_files =
+    source/config files this memory touches, doc_files = docs/spec pages), or
+    the literal 'none' if this memory touches no files of that kind.
     Duplicates are rejected/blocked with the existing #id — edit that instead."""
-    sid, agent, proj = _session_ctx(agent_type, project)
+    context, proj = _session_ctx(
+        agent_type, project, session_id, session_context)
     conn = _db()
     # proj is None only for global scope; store() re-resolves, and a bare None
     # would fall back to cwd — pass the "global" sentinel through instead.
     r = store_mod.store(
-        conn, content, title, event_type, agent_type=agent, work_type=work_type,
+        conn, content, title, event_type, context=context, work_type=work_type,
         project="global" if proj is None else proj,
-        session_id=sid, source_uri=source_uri, code_files=code_files, doc_files=doc_files,
+        source_uri=source_uri, code_files=code_files, doc_files=doc_files,
         pinned=pinned, link_to=link_to, edge_type=edge_type, force=force,
     )
     if r["outcome"] == "rejected_exact":
@@ -129,6 +153,8 @@ def trailmem_store(
         d = r["duplicate"]
         return (f"Blocked: {d['similarity']:.0%} similar to #{d['id']} [{d['node_id']}] "
                 f"'{d['title']}'. trailmem_edit(ref='#{d['id']}') or force=true.")
+    if r["outcome"] == "blocked_singleton":
+        return r["message"]
 
     parts = [f"Stored #{r['id']} [{r['node_id']}] '{title}'."]
     if supersedes:
@@ -154,10 +180,14 @@ def trailmem_query(
     project: str = None,
     limit: int = 5,
     include_archived: bool = True,
+    session_id: str = None,
+    session_context: dict = None,
 ) -> str:
     """Search memories (semantic + keyword). Returns #id, type, status, edge count [↔N]
     and a 200-char preview per hit. Use trailmem_show(ref) for full content + edges."""
-    _, _, proj = _session_ctx(project=project, required=False)
+    _, proj = _session_ctx(
+        project=project, session_id=session_id,
+        session_context=session_context, required=False)
     results = queries.query(
         _db(), text, type_filter=type_filter, agent_filter=agent_filter,
         project=proj, limit=limit, include_archived=include_archived,
@@ -167,10 +197,15 @@ def trailmem_query(
 
 @mcp.tool()
 @_tx_safe
-def trailmem_show(ref: str) -> str:
+def trailmem_show(
+    ref: str,
+    session_id: str = None,
+    session_context: dict = None,
+) -> str:
     """Fetch one memory in full: content, all edges (with [eN] ids), supersede chain.
     The only tool that returns edges — edge ids here are what link remove needs."""
-    _session_ctx(required=False)
+    _session_ctx(
+        session_id=session_id, session_context=session_context, required=False)
     data = queries.show(_db(), ref)
     if not data:
         raise ValidationError(f"ref '{ref}' not found")
@@ -189,15 +224,20 @@ def trailmem_edit(
     archive_reason: str = None,
     link_to: str = None,
     edge_type: str = "related",
+    session_id: str = None,
+    session_context: dict = None,
 ) -> str:
-    """Update a memory's content/title/type/pin, or archive it (status='archived'
-    needs archive_reason >=20 chars AND at least one edge).
+    """Update a memory's content/title/type/pin, or close it (status='completed'/
+    'cancelled' for finished/dropped tasks, 'archived' for wrong/outdated info,
+    'superseded' when replaced — all need archive_reason >=20 chars AND >=1 edge).
     Content edits refresh hash + embedding + search index automatically."""
-    _session_ctx(required=False)
+    context, _ = _session_ctx(
+        session_id=session_id, session_context=session_context, required=False)
     r = ops.edit(
         _db(), ref, content=content, title=title, event_type=event_type,
         pinned=pinned, status=status, archive_reason=archive_reason,
         link_to=link_to, edge_type=edge_type,
+        session_id=context.key if context else None,
     )
     what = ", ".join(r["changed"]) if r["changed"] else "nothing"
     msg = f"Updated #{r['id']} [{r['node_id']}] '{r['title']}': {what}."
@@ -215,11 +255,14 @@ def trailmem_link(
     edge_type: str = None,
     metadata: str = "",
     edge_id: int = None,
+    session_id: str = None,
+    session_context: dict = None,
 ) -> str:
     """Create (action='add': source, target, edge_type) or remove (action='remove':
     edge_id from trailmem_show) a typed edge between memories.
     Types: related / derived_from / supersedes / contradicts / evolves."""
-    _session_ctx(required=False)
+    _session_ctx(
+        session_id=session_id, session_context=session_context, required=False)
     conn = _db()
     if action == "add":
         if not (source and target and edge_type):

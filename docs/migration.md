@@ -1,5 +1,9 @@
 # trailmem — Seed Playbook (Omega → trailmem One-Time Transfer)
 
+Runbook for the one-time, human-reviewed data seed from Omega into trailmem through the normal `trailmem store`/`link` path — no shipped importer.
+
+**Status:** REFERENCE
+
 > **Not the SQL schema-migration doc.** This page is the one-time *data* seed from Omega. For DB schema migrations (the `MIGRATIONS` list, `PRAGMA user_version`, `ALTER TABLE` on upgrade), see [[schema]] → “Migrations”.
 
 ## Approach
@@ -86,7 +90,7 @@ This is a ~30 minute manual job for ~30 memories. Not worth automating.
 
 ---
 
-## Related specs
+## Related
 
 - [[cli]] — `trailmem store` / `trailmem link` commands the seed runs through.
 - [[schema]] — field contracts every seeded record must satisfy.

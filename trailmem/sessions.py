@@ -11,6 +11,11 @@ from .queries import edge_count
 from .store import fmt_local, now
 
 SIGNIFICANT = ("decision", "lesson", "error_pattern", "task", "session_summary", "constraint")
+AUTHORITATIVE_SESSION = (
+    "session_id NOT LIKE 'pid-%' AND session_id NOT LIKE 'cli-%' "
+    "AND session_id NOT LIKE 'adhoc-%' AND session_id NOT LIKE '%:pid-%' "
+    "AND session_id NOT LIKE '%:cli-%' AND session_id NOT LIKE '%:adhoc-%'"
+)
 
 
 def register_session(conn: sqlite3.Connection, session_id: str, agent_type: str,
@@ -19,8 +24,8 @@ def register_session(conn: sqlite3.Connection, session_id: str, agent_type: str,
     (only welcome writes it — that's the anti-bloat flag). started_at set once."""
     ts = now()
     conn.execute(
-        "INSERT INTO sessions (session_id, agent_type, project, started_at, last_seen_at) "
-        "VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO sessions (session_id, agent_type, project, started_at, last_seen_at, write_count) "
+        "VALUES (?, ?, ?, ?, ?, 0) "
         "ON CONFLICT(session_id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
         (session_id, agent_type, project, ts, ts),
     )
@@ -31,19 +36,22 @@ def welcome(conn: sqlite3.Connection, session_id: str, agent_type: str,
             project: str | None, *, force: bool = False) -> str:
     # Step 1: boundary BEFORE registering, excluding current session.
     boundary = conn.execute(
-        "SELECT MAX(started_at) FROM sessions WHERE agent_type = ? AND session_id != ?",
-        (agent_type, session_id),
+        "SELECT MAX(started_at) FROM sessions "
+        "WHERE agent_type = ? AND project IS ? AND session_id != ? "
+        f"AND {AUTHORITATIVE_SESSION}",
+        (agent_type, project, session_id),
     ).fetchone()[0]
 
-    # Prior session (this agent) that registered but stored nothing — a likely
-    # "forgot to save" lapse. Detected here so the NEXT session surfaces it.
-    prior_zero = conn.execute(
-        "SELECT s.session_id FROM sessions s "
-        "WHERE s.agent_type = ? AND s.session_id != ? "
-        "AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.session_id = s.session_id) "
-        "ORDER BY s.started_at DESC LIMIT 1",
-        (agent_type, session_id),
+    # Check ONLY the immediately previous authoritative session in this project.
+    # NULL write_count means legacy/unknown and must not produce a false alert.
+    previous = conn.execute(
+        "SELECT session_id, write_count FROM sessions "
+        "WHERE agent_type = ? AND project IS ? AND session_id != ? "
+        f"AND {AUTHORITATIVE_SESSION} "
+        "ORDER BY started_at DESC LIMIT 1",
+        (agent_type, project, session_id),
     ).fetchone()
+    prior_zero = previous is not None and previous["write_count"] == 0
 
     # Step 2: atomic read-prior + register (BEGIN IMMEDIATE = write lock).
     ts = now()
@@ -53,8 +61,9 @@ def welcome(conn: sqlite3.Connection, session_id: str, agent_type: str,
     ).fetchone()
     prior_welcome = row["last_welcome_at"] if row else None
     conn.execute(
-        "INSERT INTO sessions (session_id, agent_type, project, started_at, last_seen_at, last_welcome_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
+        "INSERT INTO sessions (session_id, agent_type, project, started_at, last_seen_at, "
+        "last_welcome_at, write_count) "
+        "VALUES (?, ?, ?, ?, ?, ?, 0) "
         "ON CONFLICT(session_id) DO UPDATE SET last_seen_at = excluded.last_seen_at, "
         "last_welcome_at = excluded.last_welcome_at",
         (session_id, agent_type, project, ts, ts, ts),
@@ -176,6 +185,29 @@ def welcome(conn: sqlite3.Connection, session_id: str, agent_type: str,
     return "\n".join(out).lstrip("\n")
 
 
+def stateless_welcome(conn: sqlite3.Connection, agent_type: str,
+                      project: str | None) -> str:
+    """Useful project briefing when a host cannot provide a real session id.
+
+    Do not claim boundaries, save status, or anti-bloat in this mode.
+    """
+    scope = "(project = ? OR project IS NULL)"
+    out = []
+    pinned = conn.execute(
+        f"SELECT * FROM memories WHERE status = 'active' AND {scope} "
+        "AND (pinned = 1 OR event_type = 'constraint') "
+        "ORDER BY pinned DESC, created_at DESC",
+        (project,),
+    ).fetchall()
+    if pinned:
+        out.append("📌 PINNED + CONSTRAINTS")
+        out.extend(_full(conn, m) for m in pinned)
+    out.append("\nSession tracking unavailable for this host; "
+               "boundary and save-status reminders are disabled.")
+    out.append("\n" + _stats_line(conn, project))
+    return "\n".join(out).lstrip("\n")
+
+
 def _full(conn, m) -> str:
     return (f"#{m['id']} [{m['node_id']}] [↔{edge_count(conn, m['node_id'])}] "
             f"[{m['event_type']}] {m['title']}\n  {m['content']}")
@@ -188,15 +220,19 @@ def _title_line(conn, m) -> str:
 
 def _action_needed(conn, project) -> list[str]:
     alerts = []
-    orphans = conn.execute(
-        "SELECT COUNT(*) FROM memories m WHERE m.status = 'active' "
+    orphan_ids = [r[0] for r in conn.execute(
+        "SELECT m.id FROM memories m WHERE m.status = 'active' "
         "AND (m.project = ? OR m.project IS NULL) "
         "AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.source_node_id = m.node_id "
-        "OR e.target_node_id = m.node_id)",
+        "OR e.target_node_id = m.node_id) ORDER BY m.id",
         (project,),
-    ).fetchone()[0]
-    if orphans:
-        alerts.append(f"{orphans} orphan{'s' if orphans > 1 else ''} need linking")
+    ).fetchall()]
+    if orphan_ids:
+        shown = ", ".join(f"#{i}" for i in orphan_ids[:5])
+        more = f", +{len(orphan_ids) - 5} more" if len(orphan_ids) > 5 else ""
+        alerts.append(
+            f"{len(orphan_ids)} orphan{'s' if len(orphan_ids) > 1 else ''} "
+            f"need linking: {shown}{more}")
     stale = conn.execute(
         "SELECT COUNT(*) FROM memories WHERE event_type = 'task' AND status = 'active' "
         "AND (project = ? OR project IS NULL) "

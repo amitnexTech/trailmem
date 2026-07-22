@@ -1,5 +1,9 @@
 # trailmem — Welcome Briefing Design
 
+Design of the session-start briefing: the seven welcome sections, session-boundary tracking, anti-bloat short/full logic, dedup across sections, and the token budget.
+
+**Status:** REFERENCE
+
 ## Purpose
 
 Session start pe agent ko context dena — kya critical rules hain, kya hua recently, kya pending hai. Minimal tokens, maximum awareness.
@@ -21,17 +25,23 @@ CREATE TABLE sessions (
     project TEXT,
     started_at TEXT NOT NULL,       -- boundary marker (immutable after set)
     last_seen_at TEXT NOT NULL,     -- activity/purge tracking only (NOT for boundary)
-    last_welcome_at TEXT            -- anti-bloat: track when welcome last served
+    last_welcome_at TEXT,           -- anti-bloat: track when welcome last served
+    write_count INTEGER NOT NULL DEFAULT 0,
+    last_write_at TEXT
 );
 ```
 
 **Critical rules:**
 - `started_at` = set ONCE on first `trailmem_*` call. NEVER updated after.
 - `last_seen_at` = updated on welcome + stop-hook only. NOT every tool call.
-- Boundary query = `MAX(started_at) WHERE agent_type=? AND session_id != current`
+- Session keys are `<agent>:<external-session-id>`.
+- Host-native IDs are converted to a versioned `SessionContext` by one
+  auto-discovered host adapter; welcome never interprets native env/payload keys.
+- Boundary query filters the same agent + project, excludes current, and ignores legacy fake IDs.
 - Session row created on FIRST `trailmem_*` call (lazy), not only on welcome.
 - `INSERT ON CONFLICT(session_id) DO UPDATE SET last_seen_at` (started_at untouched).
 - Stop-hook = non-critical. If missed, boundary still safe (started_at already exists).
+- No authoritative ID means stateless welcome: no boundary, anti-bloat, or zero-save claims.
 - Rows >90 days auto-purged in `trailmem maintain --apply`.
 
 
@@ -39,7 +49,7 @@ CREATE TABLE sessions (
 ```
 Step 1: FETCH boundary FIRST (before registering!)
         → SELECT MAX(started_at) FROM sessions 
-          WHERE agent_type=? AND session_id != current_session_id
+          WHERE agent_type=? AND project IS ? AND session_id != current_session_id
         → current_session_id MUST be excluded
           
 Step 2: READ prior welcome state + REGISTER session (ATOMIC — BEGIN IMMEDIATE transaction)
@@ -194,7 +204,7 @@ Higher section wins. No duplicate rendering. Clean output.
 
 ---
 
-## Related specs
+## Related
 
 - [[schema]] — `sessions` table, boundary columns (`started_at`/`last_seen_at`/`last_welcome_at`), and pinned/constraint fields this briefing reads.
 - [[hooks]] — SessionStart invokes this exact welcome path; anti-bloat state is shared.

@@ -1,5 +1,9 @@
 # trailmem — CLI Reference
 
+Complete reference for the `trailmem` command-line interface: write/read/list/admin/model subcommands, ref resolution, output formats, environment variables, and exit codes.
+
+**Status:** REFERENCE
+
 ## Overview
 
 `trailmem` is the command-line interface for managing agent memory. All operations available via MCP tools are also available via CLI.
@@ -34,6 +38,7 @@ trailmem edit <ref> --title "new title"
 trailmem edit <ref> --type lesson
 trailmem edit <ref> --pin            # or --no-pin
 trailmem edit <ref> --status archived --reason "why (min 20 chars)" --link-to <ref>
+trailmem edit <ref> --status completed --reason "what happened + evidence"   # task done (also: cancelled)
 
 # Archive (primary way to "remove" — preserves knowledge trail)
 trailmem archive <ref> --reason "replaced by QTcpSocket approach" --link-to <ref>
@@ -120,10 +125,17 @@ trailmem setup
 # Integrate with agent hosts (auto-detect, permission-gated)
 trailmem integrate
 # Detects 9 hosts (Claude Code via `claude` on PATH; Codex / Kiro / Kilo / OpenCode /
-# Antigravity / Zed / Cursor / Windsurf
-# via their MCP config files) and, ONLY after an explicit y/N prompt, writes each host's
-# own MCP config. Per-host config differs: Claude Code uses `claude mcp add`; others get
-# their JSON config patched. No silent changes. (Manual fallback: `claude mcp add trailmem
+# Antigravity / Zed / Cursor / Windsurf via their config paths). Host knowledge is
+# MODULAR: trailmem/hosts/ has one module per host exposing HOST with paired
+# install/remove artifacts — integrate and uninstall iterate the SAME registry, so the
+# two cannot drift; the registry auto-discovers modules, so a new host = one file.
+# WRITE POLICY (narrow-write / wide-detect): after the y/N prompt, configs are
+# auto-written ONLY for hosts whose format is verified against the live binary —
+# Claude Code (via its own `claude mcp add`), Codex (TOML), Kiro, Kilo. Every OTHER
+# detected host gets the exact manual entry PRINTED instead of having its config
+# edited (hand-written entries corrupted Kilo and OpenCode configs before; flip a
+# host module's write flag once its format is verified). No silent changes.
+# (Manual fallback: `claude mcp add trailmem
 # -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server`.)
 # Server launch is ALWAYS `<python> -u -m trailmem.mcp_server` — the generated
 # `trailmem-mcp` script was removed in 0.1.7: Windows Smart App Control blocks unsigned
@@ -135,16 +147,34 @@ trailmem integrate
 # is host-specific and schema-verified: Kilo + OpenCode use `environment`, everything else
 # `env` (Codex: TOML inline table; Claude Code: `claude mcp add -e`). Re-running integrate
 # UPGRADES an existing entry that lacks the env map instead of skipping it. Codex also gets
-# ~/.codex/prompts/trailmem-save.md → /prompts:trailmem-save (no MCP-prompt support there).
+# ~/.codex/prompts/trailmem-save.md → /prompts:trailmem-save (no MCP-prompt support there)
+# AND two hooks merged into ~/.codex/hooks.json: SessionStart for one welcome,
+# plus a TrailMem-only PreToolUse adapter that silently carries canonical
+# session_context into MCP arguments. Codex Stop is not used. See [[hooks]].
+# Claude Code and Antigravity also get a statusline: if the host's settings.json
+# (~/.claude/settings.json / ~/.gemini/antigravity-cli/settings.json) has NO
+# statusLine, integrate writes `<python> -m trailmem statusline --agent <slug>`
+# there; an existing user statusline is NEVER overwritten (the exact command to
+# chain into it is printed instead). --agent is required because the statusline
+# process is spawned outside the MCP entry, so the TRAILMEM_AGENT_TYPE env pin
+# never reaches it. Uninstall removes the statusLine only when it is trailmem's own.
 # ANY other MCP agent works manually: stdio transport, command `<python> -u -m
-# trailmem.mcp_server`, and set TRAILMEM_AGENT_TYPE in the entry's env for attribution.
+# trailmem.mcp_server`, and TRAILMEM_AGENT_TYPE=<lowercase-slug>. Set
+# TRAILMEM_SESSION_ID when the host exposes a stable conversation ID; otherwise
+# CRUD works in stateless mode and no boundary/save-status claims are made.
 # README has the generic guide ("Any other MCP agent") with the common JSON shape;
 # the right <python> is printed by `python -c "import sys; print(sys.executable)"` from
 # the environment trailmem is installed into.
 
 # Health check
 trailmem doctor
-# Verifies: home + config presence, DB tables, sqlite-vec extension, embedding model
+# Verifies: installed version, home + config presence, DB tables, sqlite-vec
+# extension, embedding model. Then a host-capability section: every detected
+# host's artifacts (MCP registration, skill, hooks, statusline) with config
+# drift flagged — a STALE trailmem-mcp launcher or a missing TRAILMEM_AGENT_TYPE
+# pin says "run `trailmem integrate`". Finally lists running MCP server
+# processes (POSIX `ps`; skipped on Windows) and flags any started BEFORE this
+# install — old servers keep writing with old code until their host restarts.
 
 # Self-update (no manual reinstall)
 trailmem update
@@ -160,12 +190,16 @@ trailmem update
 # Uninstall (surgical reversal of integrate; memories KEPT by default)
 trailmem uninstall
 # After one y/N prompt, SURGICALLY removes only trailmem's own artifacts and leaves
-# everything else in each config intact: the `trailmem` entry in every JSON host config
+# everything else in each config intact — it walks the SAME hosts/ registry as
+# integrate (every artifact pairs install with remove), covering ALL hosts including
+# ones this release no longer auto-writes (older releases did): the `trailmem` entry
+# in every JSON host config
 # (Kiro/Kilo/OpenCode/Antigravity/Zed/Cursor/Windsurf), the Codex
 # `[mcp_servers.trailmem]` TOML table, the Claude Code registration (via `claude mcp
 # remove --scope user`), the usage skill at <skills>/trailmem/SKILL.md
-# (claude/codex/kilo/opencode), ~/.claude/commands/tm-save.md, and
-# ~/.codex/prompts/trailmem-save.md. The one-time .bak-trailmem backups are NOT
+# (claude/codex/kilo/opencode), ~/.claude/commands/tm-save.md,
+# ~/.codex/prompts/trailmem-save.md, and both TrailMem hook entries in
+# ~/.codex/hooks.json (foreign hooks untouched). The one-time .bak-trailmem backups are NOT
 # restored (the user may have edited configs since integrate); unparseable JSONC
 # configs are never rewritten — a manual-removal instruction is printed instead.
 # ~/.trailmem (ALL memories) is KEPT by default: most uninstalls are temporary
@@ -210,8 +244,8 @@ Model config lives in `~/.trailmem/config.json`. Dedup thresholds (0.85/0.92) ar
 ### HOST Integration
 
 ```bash
-# One-line session status for a host statusline (reads session_id from stdin
-# JSON or CLAUDE_CODE_SESSION_ID/KIRO_SESSION_ID env; read-only, always exit 0)
+# One-line session status for a host statusline (resolves the host adapter's
+# canonical session context; successful creates/edits count; always exit 0)
 trailmem statusline
 #   → 🧠 trailmem: N saved this session      (N > 0)
 #   → ⚠ trailmem: 0 saved this session · /tm-save before exit   (N = 0)
@@ -267,9 +301,9 @@ trailmem export --format json
 
 | Variable | Purpose | Auto-fill |
 |----------|---------|-----------|
-| `TRAILMEM_AGENT_TYPE` | Default agent_type | Auto-detects from CLAUDE_CODE_SESSION_ID etc |
-| `CLAUDE_CODE_SESSION_ID` | Session tracking | Claude Code sets this |
-| `KIRO_SESSION_ID` | Session tracking | Kiro sets this |
+| `TRAILMEM_AGENT_TYPE` | Generic agent identity / MCP host pin | Set by integration config |
+| `TRAILMEM_SESSION_ID` | Generic stable external session ID | Optional; no value means stateless |
+| Host-native session vars | Adapter input only | Declared in that host's module |
 | `TRAILMEM_DB` | Custom DB path | Default: ~/.trailmem/trailmem.db |
 | `TRAILMEM_HOME` | Custom home dir (config, models, DB, hooks.log) | Default: ~/.trailmem |
 | `TRAILMEM_PROJECT` | Override project detection. Value must be an absolute path or the literal `global` (stores NULL for cross-project scope); a bare name is rejected. | Default: cwd |
@@ -288,7 +322,7 @@ trailmem export --format json
 
 ---
 
-## Related specs
+## Related
 
 - [[mcp]] — the six MCP tools that share this CLI's validation/storage paths.
 - [[schema]] — data contracts; `model`/`reindex` commands map to the embedding config.

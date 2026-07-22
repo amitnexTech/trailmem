@@ -9,7 +9,10 @@ import json
 import os
 import sys
 
-from . import __version__, console, dashboard, embeddings, integrate, models, ops, queries, sessions
+from . import (
+    __version__, console, dashboard, embeddings, hosts, integrate, models, ops,
+    queries, sessions,
+)
 from . import store as store_mod
 from .config import CONFIG_PATH, TRAILMEM_HOME, db_path, load_config, save_config
 from .console import sym
@@ -24,22 +27,22 @@ def _conn():
 
 
 def _ctx(agent=None):
-    agent = store_mod.resolve_agent(agent)
-    # None means global scope here; keep the "global" sentinel so store()'s
-    # re-resolve doesn't fall back to cwd and silently project-scope it.
-    proj = store_mod.resolve_project(None) or "global"
-    sid = store_mod.session_id_from_env()
-    return agent, proj, sid
+    context = hosts.resolve_context(agent_type=agent)
+    # Keep the global sentinel so store() does not re-resolve NULL to cwd.
+    return context, context.project or "global"
 
 
 # ---- write ops ----
 
 def cmd_store(a) -> int:
     conn = _conn()
-    agent, proj, sid = _ctx(a.agent)
+    context, proj = _ctx(a.agent)
+    if context.key:
+        sessions.register_session(
+            conn, context.key, context.agent_type, context.project)
     r = store_mod.store(
-        conn, a.content, a.title, a.type, agent_type=agent, work_type=a.work_type,
-        project=proj, session_id=sid, source_uri=a.source,
+        conn, a.content, a.title, a.type, context=context, work_type=a.work_type,
+        project=proj, source_uri=a.source,
         code_files=a.code_files, doc_files=a.doc_files,
         pinned=a.pin, link_to=a.link_to, edge_type=a.edge_type, force=a.force,
     )
@@ -52,6 +55,9 @@ def cmd_store(a) -> int:
         d = r["duplicate"]
         print(f"Blocked: {d['similarity']:.0%} similar to #{d['id']} [{d['node_id']}] "
               f"'{d['title']}'. Edit it or pass --force.")
+        return 4
+    if r["outcome"] == "blocked_singleton":
+        print(r["message"])
         return 4
     print(f"Stored #{r['id']} [{r['node_id']}] '{a.title}'.")
     if a.supersedes:
@@ -67,17 +73,27 @@ def cmd_store(a) -> int:
 
 
 def cmd_edit(a) -> int:
-    r = ops.edit(_conn(), a.ref, content=a.content, title=a.title, event_type=a.type,
+    conn = _conn()
+    context, _ = _ctx(a.agent)
+    if context.key:
+        sessions.register_session(
+            conn, context.key, context.agent_type, context.project)
+    r = ops.edit(conn, a.ref, content=a.content, title=a.title, event_type=a.type,
                  pinned=a.pin, link_to=a.link_to, edge_type=a.edge_type,
-                 status=a.status, archive_reason=a.reason)
+                 status=a.status, archive_reason=a.reason, session_id=context.key)
     print(f"Updated #{r['id']} [{r['node_id']}] '{r['title']}': "
           f"{', '.join(r['changed']) or 'nothing'}.")
     return 0
 
 
 def cmd_archive(a) -> int:
-    r = ops.edit(_conn(), a.ref, status="archived", archive_reason=a.reason,
-                 link_to=a.link_to)
+    conn = _conn()
+    context, _ = _ctx(a.agent)
+    if context.key:
+        sessions.register_session(
+            conn, context.key, context.agent_type, context.project)
+    r = ops.edit(conn, a.ref, status="archived", archive_reason=a.reason,
+                 link_to=a.link_to, session_id=context.key)
     print(f"Archived #{r['id']} [{r['node_id']}] '{r['title']}'. Reason: '{a.reason}'.")
     return 0
 
@@ -140,7 +156,7 @@ def cmd_show(a) -> int:
 
 
 def cmd_query(a) -> int:
-    _, proj, _ = _ctx()
+    _, proj = _ctx()
     results = queries.query(_conn(), a.text, type_filter=a.type, agent_filter=a.agent,
                             project=proj, limit=a.limit)
     if a.format == "json":
@@ -151,16 +167,20 @@ def cmd_query(a) -> int:
 
 
 def cmd_welcome(a) -> int:
-    agent, proj, sid = _ctx(a.agent)
-    sid = sid or f"cli-{os.getppid()}"
-    print(sessions.welcome(_conn(), sid, agent, proj, force=a.force))
+    context, proj = _ctx(a.agent)
+    conn = _conn()
+    if context.key:
+        print(sessions.welcome(
+            conn, context.key, context.agent_type, proj, force=a.force))
+    else:
+        print(sessions.stateless_welcome(conn, context.agent_type, proj))
     return 0
 
 
 def cmd_similar(a) -> int:
     import hashlib
     conn = _conn()
-    _, proj, _ = _ctx()
+    _, proj = _ctx()
     h = hashlib.sha256(a.content.encode()).hexdigest()
     dup = conn.execute(
         "SELECT id, node_id, title FROM memories WHERE content_hash = ? AND project IS ?",
@@ -182,7 +202,7 @@ def cmd_similar(a) -> int:
 
 def cmd_list(a) -> int:
     conn = _conn()
-    _, proj, _ = _ctx()
+    _, proj = _ctx()
     where, params, order, limit = ["1=1"], [], "created_at DESC", None
     if a.archived:
         where.append("status != 'active'")
@@ -227,7 +247,7 @@ def cmd_list(a) -> int:
 
 def cmd_stats(a) -> int:
     conn = _conn()
-    _, proj, _ = _ctx()
+    _, proj = _ctx()
     print(sessions._stats_line(conn, proj))
     print(f"DB: {db_path()} ({db_path().stat().st_size // 1024} KB)")
     for row in conn.execute(
@@ -404,10 +424,62 @@ def cmd_update(a) -> int:
     return 0
 
 
+def _server_processes():
+    """Running trailmem MCP servers via `ps` (POSIX; empty list on Windows).
+    Returns (pid, elapsed_seconds) pairs."""
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,etimes=,args="],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return []
+    rows = []
+    for line in out.splitlines():
+        if "trailmem.mcp_server" in line or "trailmem-mcp" in line:
+            parts = line.split(None, 2)
+            try:
+                rows.append((int(parts[0]), int(parts[1])))
+            except (ValueError, IndexError):
+                pass
+    return rows
+
+
+def _doctor_hosts() -> None:
+    """Per detected host: artifact status + config drift (stale launcher /
+    missing env pin), then running servers older than this install — the
+    recurring 'old server kept writing' incident, now visible."""
+    import time
+    for host in hosts.HOSTS:
+        try:
+            if not host.detect():
+                continue
+        except Exception:
+            continue
+        for art in host.artifacts:
+            if art.check is None:
+                continue
+            try:
+                status = art.check()
+            except Exception as exc:
+                status = f"check failed ({exc})"
+            print(f"host:   {host.name} {art.label}: {status}")
+    installed_at = os.path.getmtime(os.path.dirname(os.path.abspath(__file__)))
+    now = time.time()
+    for pid, age in _server_processes():
+        started = now - age
+        mins = age // 60
+        if started < installed_at:
+            print(f"server: pid {pid} up {mins}m — started BEFORE this install; "
+                  "old code may keep writing. Restart that host.")
+        else:
+            print(f"server: pid {pid} up {mins}m (current install)")
+
+
 def cmd_doctor(a) -> int:
     ok = True
     yes, no = sym("✓", "[OK]"), sym("✗", "[X]")
     cfg = load_config()
+    print(f"version: {__version__}")
     print(f"home:   {TRAILMEM_HOME} {yes if TRAILMEM_HOME.exists() else no + ' (run trailmem setup)'}")
     print(f"config: {CONFIG_PATH} {yes if CONFIG_PATH.exists() else no}")
     if not db_path().exists():
@@ -430,6 +502,7 @@ def cmd_doctor(a) -> int:
     else:
         print("vec:    disabled by config — FTS-only mode (exact-hash dedup only)")
     conn.close()
+    _doctor_hosts()
     return 0 if ok else 1
 
 
@@ -465,19 +538,26 @@ def cmd_statusline(a) -> int:
     stored. Reads session_id from stdin JSON (Claude Code) or the usual env
     vars. Prints nothing-noisy on failure — a statusline must never break."""
     try:
-        sid = None
+        payload = {}
         if not sys.stdin.isatty():
-            import json
             try:
-                sid = json.loads(sys.stdin.read() or "{}").get("session_id")
+                payload = json.loads(sys.stdin.read() or "{}")
             except Exception:
-                sid = None
-        sid = sid or store_mod.session_id_from_env()
-        if not sid:
+                payload = {}
+        context = hosts.resolve_context(
+            agent_type=a.agent,
+            payload=payload,
+            canonical=payload.get("session_context") if isinstance(payload, dict) else None,
+            required=False,
+        )
+        if not context or not context.key:
             return 0  # no session context → say nothing
-        n = _conn().execute(
-            "SELECT COUNT(*) FROM memories WHERE session_id = ?", (sid,)
-        ).fetchone()[0]
+        row = _conn().execute(
+            "SELECT write_count FROM sessions WHERE session_id = ?", (context.key,)
+        ).fetchone()
+        if row is None or row["write_count"] is None:
+            return 0
+        n = row["write_count"]
         if n > 0:
             print(f"{sym('🧠', '[TM]')} trailmem: {n} saved this session")
         else:
@@ -492,22 +572,54 @@ def cmd_statusline(a) -> int:
 
 def cmd_hook(a) -> int:
     import traceback
-    try:
-        agent, proj, sid = _ctx(a.agent)
-    except ValidationError:
-        agent, proj, sid = None, os.getcwd(), None
+    # Hosts pipe the event JSON on stdin (Claude Code and Codex alike:
+    # {"session_id": ..., "cwd": ...}). For Codex this is the ONLY source —
+    # its hook process gets a clean env, no CODEX_THREAD_ID. The payload is
+    # per-event and authoritative, so it wins over env detection (a parent
+    # shell can leak another agent's session vars); TRAILMEM_PROJECT stays
+    # an explicit override.
+    payload = {}
+    if sys.stdin and not sys.stdin.isatty():
+        try:
+            payload = json.loads(sys.stdin.read() or "{}")
+        except Exception:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    context = hosts.resolve_context(
+        agent_type=a.agent,
+        payload=payload,
+        canonical=payload.get("session_context"),
+        event=a.event,
+        required=False,
+    )
+    if a.event == "tool-context":
+        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+        if context and isinstance(tool_input, dict):
+            updated = dict(tool_input)
+            updated["session_context"] = context.to_payload()
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "updatedInput": updated,
+                }
+            }))
+        return 0
     try:
         if a.event == "session-start":
             conn = _conn()
-            if agent and sid:
-                print(sessions.welcome(conn, sid, agent, proj))
-            elif agent:  # session-less mode: welcome without boundary tracking
-                print(sessions.welcome(conn, f"adhoc-{os.getppid()}", agent, proj))
+            if context and context.key:
+                print(sessions.welcome(
+                    conn, context.key, context.agent_type, context.project))
+            elif context:
+                print(sessions.stateless_welcome(
+                    conn, context.agent_type, context.project))
         elif a.event == "session-stop":
-            if sid:
+            if context and context.key:
                 conn = _conn()
                 conn.execute("UPDATE sessions SET last_seen_at = ? WHERE session_id = ?",
-                             (store_mod.now(), sid))
+                             (store_mod.now(), context.key))
                 conn.commit()
     except Exception:
         try:
@@ -549,8 +661,8 @@ def main(argv=None) -> int:
     s.add_argument("--agent")
     s.add_argument("--work-type")
     s.add_argument("--source")
-    s.add_argument("--code-files", help="Source/config files this memory touches (comma-separated)")
-    s.add_argument("--doc-files", help="Docs/spec pages this memory touches (comma-separated)")
+    s.add_argument("--code-files", help="REQUIRED: source/config files this memory touches (comma-separated), or 'none'")
+    s.add_argument("--doc-files", help="REQUIRED: docs/spec pages this memory touches (comma-separated), or 'none'")
     # Deprecated pre-0.1.7 spelling; feeds code_files.
     s.add_argument("--modified-files", dest="code_files", help=argparse.SUPPRESS)
     s.add_argument("--pin", action="store_true")
@@ -567,16 +679,18 @@ def main(argv=None) -> int:
     s.add_argument("--title")
     s.add_argument("--type")
     s.add_argument("--pin", action=argparse.BooleanOptionalAction)
-    s.add_argument("--status", choices=["archived", "superseded"])
+    s.add_argument("--status", choices=["archived", "superseded", "completed", "cancelled"])
     s.add_argument("--reason")
     s.add_argument("--link-to")
     s.add_argument("--edge-type", default="related")
+    s.add_argument("--agent")
     s.set_defaults(func=cmd_edit)
 
     s = sub.add_parser("archive", help="Archive a memory (preserves trail)")
     s.add_argument("ref")
     s.add_argument("--reason", required=True)
     s.add_argument("--link-to")
+    s.add_argument("--agent")
     s.set_defaults(func=cmd_archive)
 
     s = sub.add_parser("link", help="Link two memories")
@@ -687,10 +801,11 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_delete)
 
     s = sub.add_parser("statusline", help="One-line session status for a host statusline")
+    s.add_argument("--agent", help="host agent slug (statusline process lacks the MCP env pin)")
     s.set_defaults(func=cmd_statusline)
 
     s = sub.add_parser("hook", help="Host lifecycle hooks (always exit 0)")
-    s.add_argument("event", choices=["session-start", "session-stop"])
+    s.add_argument("event", choices=["session-start", "session-stop", "tool-context"])
     s.add_argument("--agent")
     s.set_defaults(func=cmd_hook)
 

@@ -1,5 +1,9 @@
 # trailmem — Duplicate Detection
 
+How trailmem handles duplicate memories at store time: exact-hash check first, then a 4-band embedding-similarity policy (reject/block/warn/accept) plus store-time link suggestions.
+
+**Status:** REFERENCE
+
 ## Overview
 
 4-band similarity system. Not blanket accept/reject — response depends on how similar the new memory is to existing ones.
@@ -129,7 +133,7 @@ Reuse the same content-comparison signals the similarity pass already produces. 
 
 ---
 
-## Related specs
+## Related
 
 - [[schema]] — `content_hash`, `memories_vec`, per-model thresholds, and embedding config.
 - [[mcp]] — `trailmem_store` processing order that runs this policy; error-vs-business-outcome rules.

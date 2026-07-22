@@ -58,7 +58,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     project TEXT,
     started_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
-    last_welcome_at TEXT
+    last_welcome_at TEXT,
+    write_count INTEGER NOT NULL DEFAULT 0,
+    last_write_at TEXT
 )
 """
 
@@ -219,6 +221,16 @@ MIGRATIONS: list[str] = [
     # field got only doc paths in practice). Existing data lands in code_files.
     "ALTER TABLE memories RENAME COLUMN modified_files TO code_files;\n"
     "ALTER TABLE memories ADD COLUMN doc_files TEXT;",
+    # 2: session save-awareness must count successful edits as well as creates.
+    # Existing zero rows remain NULL = unknown so pre-fix PID/UUID splits do not
+    # produce false "saved 0" warnings after upgrade.
+    "ALTER TABLE sessions ADD COLUMN write_count INTEGER;\n"
+    "ALTER TABLE sessions ADD COLUMN last_write_at TEXT;\n"
+    "UPDATE sessions SET write_count = ("
+    "SELECT COUNT(*) FROM memories m WHERE m.session_id = sessions.session_id"
+    ") WHERE EXISTS ("
+    "SELECT 1 FROM memories m WHERE m.session_id = sessions.session_id"
+    ");",
 ]
 
 
