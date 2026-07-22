@@ -5,6 +5,10 @@ teaching TrailMem core about that host's native environment or event format.
 
 **Status:** REFERENCE
 
+Before writing an adapter, have the target agent run the [[host-discovery]]
+self-report — its evidence-backed answers (session id source, hook events and
+registration schema, command/prompt support) are the input this page codifies.
+
 ## Architecture Contract
 
 One host conversation must produce one canonical `SessionContext`, one

@@ -14,6 +14,7 @@ Trailmem is a local-first, graph-linked persistent memory system for AI coding a
 - [[mcp]] — Six stdio MCP tools, response boundaries, and concurrency rules.
 - [[hooks]] — Minimal SessionStart/Stop lifecycle integration.
 - [[host-integration]] — Add a new agent host through one auto-discovered adapter module.
+- [[host-discovery]] — Evidence-backed self-report prompt a new host agent runs before its adapter is written.
 - [[migration]] — One-time human-reviewed quality seed; no vendor importer.
 - [[dashboard]] — Quiet, local-first graph dashboard design contract.
 
