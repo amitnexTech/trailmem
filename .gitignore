@@ -31,3 +31,17 @@ CLAUDE.md
 trailmem deep finding.txt
 trailmem finding.txt
 new fix.txt
+
+# scratch scripts from one-off investigations (never ship)
+apply_html_swap.py
+check.py
+check_v3.py
+extract.py
+extract2.py
+extract3.py
+fix_mobile_css.py
+kilo.json
+update_script.py
+update_script_v2.py
+update_script_v3.py
+uv.lock
