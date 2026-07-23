@@ -46,3 +46,4 @@ update_script_v2.py
 update_script_v3.py
 uv.lock
 .kiro/
+.agents/
