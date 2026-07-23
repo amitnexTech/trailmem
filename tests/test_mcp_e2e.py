@@ -89,6 +89,15 @@ async def run():
                 session_id="explicit-session")
             assert not err and "title" in ed2, ed2
 
+            # project rescope: absolute path or 'global'; relative → protocol error
+            err, ed3 = await call(sess, "trailmem_edit", ref=node,
+                                  project="/tmp/tm-mcp-e2e-other")
+            assert not err and "project→/tmp/tm-mcp-e2e-other" in ed3, ed3
+            err, ed4 = await call(sess, "trailmem_edit", ref=node, project="global")
+            assert not err and "project→global" in ed4, ed4
+            err, _ = await call(sess, "trailmem_edit", ref=node, project="relative/path")
+            assert err, "relative project path must be a protocol error"
+
             # unknown ref → protocol error (isError=True)
             err, _ = await call(sess, "trailmem_show", ref="mem-nonexist")
             assert err, "unknown ref must be a protocol error"

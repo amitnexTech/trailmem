@@ -75,11 +75,14 @@ def run() -> None:
     assert leaked_env.agent_type == "codex", "trusted hook adapter must win"
 
     kctx = kiro.HOST.resolve_context(
-        {"conversationId": "kiro-1", "cwd": "/tmp/k"},
+        {"session_id": "kiro-1", "cwd": "/tmp/k"},
         env={},
         event="session-start",
     )
     assert kctx.key == "kiro:kiro-1"
+    # Kiro's real payload sends session_id="" — must resolve stateless.
+    empty = kiro.HOST.resolve_context({"session_id": "", "cwd": "/tmp/k"}, env={})
+    assert empty.session_id is None
 
     generic = resolve_context(
         agent_type="future-agent",

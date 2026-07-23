@@ -224,19 +224,22 @@ def trailmem_edit(
     archive_reason: str = None,
     link_to: str = None,
     edge_type: str = "related",
+    project: str = None,
     session_id: str = None,
     session_context: dict = None,
 ) -> str:
     """Update a memory's content/title/type/pin, or close it (status='completed'/
     'cancelled' for finished/dropped tasks, 'archived' for wrong/outdated info,
     'superseded' when replaced — all need archive_reason >=20 chars AND >=1 edge).
+    `project` rescopes a misfiled memory (absolute path or 'global') — content,
+    hash and embedding stay untouched.
     Content edits refresh hash + embedding + search index automatically."""
     context, _ = _session_ctx(
         session_id=session_id, session_context=session_context, required=False)
     r = ops.edit(
         _db(), ref, content=content, title=title, event_type=event_type,
         pinned=pinned, status=status, archive_reason=archive_reason,
-        link_to=link_to, edge_type=edge_type,
+        link_to=link_to, edge_type=edge_type, project=project,
         session_id=context.key if context else None,
     )
     what = ", ".join(r["changed"]) if r["changed"] else "nothing"

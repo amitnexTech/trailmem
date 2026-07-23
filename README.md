@@ -48,7 +48,7 @@ trailmem doctor         # health check
 trailmem integrate      # detects installed agent hosts, asks before writing any config
 ```
 
-`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), and skips hosts that are already registered. **Configs are auto-written only for hosts whose format is verified against the live binary** — Claude Code (via its own `claude mcp add`), Codex, Kiro, Kilo. For the other detected hosts it prints the exact entry to paste instead of editing their config (hand-written entries have corrupted host configs before; a host is promoted to auto-write once its format is verified). It also never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed too). On Claude Code it installs a `/tm-save` slash command; on Codex a `/prompts:trailmem-save` prompt and a SessionStart hook (`~/.codex/hooks.json` — trust it via `/hooks` after restarting Codex). On hosts that read Agent Skills (Claude Code, Codex, Kilo, OpenCode) it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source.
+`trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), and skips hosts that are already registered. **Configs are auto-written only for hosts whose format is verified against the live binary** — Claude Code (via its own `claude mcp add`), Codex, Kiro, Kilo, OpenCode, Antigravity. For the other detected hosts it prints the exact entry to paste instead of editing their config (hand-written entries have corrupted host configs before; a host is promoted to auto-write once its format is verified). It also never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed too). On Claude Code, Kilo, and OpenCode it installs a `/tm-save` slash command; on Codex a `/prompts:trailmem-save` prompt and a SessionStart hook (`~/.codex/hooks.json` — trust it via `/hooks` after restarting Codex); on Kiro a per-workspace SessionStart hook (`<workspace>/.kiro/hooks/`); on Antigravity a deduped PreInvocation welcome hook (`~/.gemini/config/hooks.json` — injects the briefing once per conversation, restart `agy` after install). On hosts that read Agent Skills it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source — user-level on Claude Code, Codex, Kilo, OpenCode; per-workspace on Antigravity (`<workspace>/.agents/skills/`, the only non-builtin skills dir agy reads — re-run `integrate` per workspace).
 
 > **Windows note:** the MCP server is registered as `python -u -m trailmem.mcp_server` — never as a generated `.exe`. Windows **Smart App Control** silently blocks unsigned per-install launcher `.exe`s (the kind pip/uv generate), which kills a host-spawned server with no error anywhere. If the `trailmem` CLI itself is blocked by SAC, run it as `python -m trailmem` from the environment it's installed into.
 
@@ -81,11 +81,11 @@ The server launch command everywhere is `<python> -u -m trailmem.mcp_server`, wh
 | Host | Manual registration |
 |------|--------------------|
 | Claude Code | `claude mcp add trailmem -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server` |
-| Codex | add an `[mcp_servers.trailmem]` table to `~/.codex/config.toml` |
+| Codex | add an `[mcp_servers.trailmem]` table to `$CODEX_HOME/config.toml` (default `~/.codex`) |
 | Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
 | Kilo | add `trailmem` under `mcp` in `~/.config/kilo/kilo.jsonc` as `{"type":"local","command":["<python>","-u","-m","trailmem.mcp_server"]}` (kilo 7.x format) |
 | OpenCode | add `trailmem` under `mcp` in `~/.config/opencode/opencode.json` |
-| Antigravity | add `trailmem` under `mcpServers` in `~/.gemini/config/mcp_config.json` |
+| Antigravity | add `trailmem` under `mcpServers` in `~/.gemini/config/mcp_config.json` (no `agy mcp` CLI — file edit only; restart agy) |
 | Zed | add `trailmem` under `context_servers` in `~/.config/zed/settings.json` |
 | Cursor | add `trailmem` under `mcpServers` in `~/.cursor/mcp.json` |
 | Windsurf | add `trailmem` under `mcpServers` in `~/.codeium/windsurf/mcp_config.json` |

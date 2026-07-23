@@ -80,7 +80,8 @@ def cmd_edit(a) -> int:
             conn, context.key, context.agent_type, context.project)
     r = ops.edit(conn, a.ref, content=a.content, title=a.title, event_type=a.type,
                  pinned=a.pin, link_to=a.link_to, edge_type=a.edge_type,
-                 status=a.status, archive_reason=a.reason, session_id=context.key)
+                 status=a.status, archive_reason=a.reason, project=a.project,
+                 session_id=context.key)
     print(f"Updated #{r['id']} [{r['node_id']}] '{r['title']}': "
           f"{', '.join(r['changed']) or 'nothing'}.")
     return 0
@@ -586,14 +587,42 @@ def cmd_hook(a) -> int:
             payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    project = None
+    # Antigravity payloads (every event) carry the workspace as a
+    # workspacePaths ARRAY — unusable by the first-string-wins payload scan,
+    # so unpack it here; no other host sends the key.
+    ws = payload.get("workspacePaths")
+    if isinstance(ws, list) and ws and isinstance(ws[0], str):
+        project = ws[0]
     context = hosts.resolve_context(
         agent_type=a.agent,
         payload=payload,
         canonical=payload.get("session_context"),
-        event=a.event,
+        event="session-start" if a.event == "pre-invocation" else a.event,
+        project=project,
         required=False,
     )
     if a.event == "tool-context":
+        if a.agent == "antigravity":
+            # Antigravity PreToolUse shape: every MCP call is dispatched via
+            # call_mcp_tool{ServerName, ToolName, Arguments} (verified from
+            # live brain transcripts). Rewrite ONLY trailmem calls; agy's
+            # `overwrite` is a SHALLOW top-level merge, so the FULL Arguments
+            # object is echoed back with session_context added. Stdout is
+            # ALWAYS exactly one JSON object — bare {} is the no-op for
+            # foreign servers and malformed payloads (never emit a decision
+            # for tools not ours).
+            out = {}
+            tool_call = payload.get("toolCall")
+            args = tool_call.get("args") if isinstance(tool_call, dict) else None
+            args = args if isinstance(args, dict) else {}
+            if context and args.get("ServerName") == "trailmem":
+                inner = args.get("Arguments")
+                inner = dict(inner) if isinstance(inner, dict) else {}
+                inner["session_context"] = context.to_payload()
+                out = {"decision": "allow", "overwrite": {"Arguments": inner}}
+            print(json.dumps(out))
+            return 0
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         if context and isinstance(tool_input, dict):
             updated = dict(tool_input)
@@ -606,8 +635,43 @@ def cmd_hook(a) -> int:
                 }
             }))
         return 0
+    inject = {}  # pre-invocation stdout must ALWAYS be a JSON object
     try:
-        if a.event == "session-start":
+        if a.event == "pre-invocation":
+            # Antigravity: fires before EVERY model call — inject the briefing
+            # only on the conversation's first fire (marker per conversationId),
+            # every later fire emits {}. Session-aware welcome since the
+            # PreToolUse tool-context transport was live-proven (2026-07-23:
+            # store landed with antigravity:<conversationId>, write_count
+            # incremented) — stores carry the same key, so registration here
+            # completes the "saved N" tracking instead of stranding rows at 0.
+            if context and context.session_id:
+                import re
+                import time
+                safe = re.sub(r"[^A-Za-z0-9._-]", "_",
+                              f"{context.agent_type}-{context.session_id}")
+                marker = TRAILMEM_HOME / "welcomed" / safe
+                if not marker.exists():
+                    # session_id present ⇒ key present (session_key never
+                    # returns None here), so no stateless fallback needed
+                    text = sessions.welcome(
+                        _conn(), context.key, context.agent_type,
+                        context.project)
+                    marker.parent.mkdir(parents=True, exist_ok=True)
+                    cutoff = time.time() - 30 * 86400
+                    for old in marker.parent.iterdir():
+                        if old.stat().st_mtime < cutoff:
+                            old.unlink()
+                    marker.touch()
+                    # userMessage, NOT ephemeralMessage: ephemeral is transient
+                    # (one model invocation, never persisted — and agy makes
+                    # several invocations per turn, so the briefing missed the
+                    # planner and evaporated by turn 2; live-proven 2026-07-23).
+                    # userMessage persists as a conversation step for all turns.
+                    inject = {"injectSteps": [{"userMessage":
+                        "[trailmem session briefing — context only, "
+                        "no reply needed]\n" + text}]}
+        elif a.event == "session-start":
             conn = _conn()
             if context and context.key:
                 print(sessions.welcome(
@@ -630,6 +694,8 @@ def cmd_hook(a) -> int:
         except Exception:
             pass
         print(f"trailmem hook {a.event} failed (see ~/.trailmem/hooks.log)", file=sys.stderr)
+    if a.event == "pre-invocation":
+        print(json.dumps(inject))
     return 0  # ALWAYS — a memory failure must never block the agent
 
 
@@ -683,6 +749,7 @@ def main(argv=None) -> int:
     s.add_argument("--reason")
     s.add_argument("--link-to")
     s.add_argument("--edge-type", default="related")
+    s.add_argument("--project", help="rescope: absolute path or 'global'")
     s.add_argument("--agent")
     s.set_defaults(func=cmd_edit)
 
@@ -805,7 +872,8 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_statusline)
 
     s = sub.add_parser("hook", help="Host lifecycle hooks (always exit 0)")
-    s.add_argument("event", choices=["session-start", "session-stop", "tool-context"])
+    s.add_argument("event", choices=["session-start", "session-stop",
+                                     "tool-context", "pre-invocation"])
     s.add_argument("--agent")
     s.set_defaults(func=cmd_hook)
 

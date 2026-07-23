@@ -3,6 +3,7 @@
 1. SessionStart reads Codex's authoritative session_id + cwd from stdin.
 2. PreToolUse preserves tool args and injects one canonical SessionContext.
 3. integrate writes/merges both hooks surgically and uninstall reverses ours.
+4. Every Codex path follows $CODEX_HOME (default ~/.codex).
 """
 
 import io
@@ -125,6 +126,22 @@ def run() -> None:
         assert codex.remove_hook() is None, "second removal is a no-op"
     finally:
         _util._HOME = real_home
+
+    # --- 3. $CODEX_HOME override (official manual: all paths follow it) ---
+    alt = Path(HOME) / "alt-codex-home"
+    os.environ["CODEX_HOME"] = str(alt)
+    try:
+        assert codex._toml_path() == alt / "config.toml"
+        assert codex._hooks_path() == alt / "hooks.json"
+        assert codex._prompt_path() == alt / "prompts" / "trailmem-save.md"
+        assert not codex.HOST.detect(), "no dir yet — must not detect"
+        alt.mkdir(parents=True)
+        assert codex.HOST.detect(), "detect must follow $CODEX_HOME"
+        assert "written" in codex.install_hook()
+        assert (alt / "hooks.json").exists()
+    finally:
+        del os.environ["CODEX_HOME"]
+    assert codex._codex_home() != alt, "unset must fall back to ~/.codex"
 
     print("CODEX HOOK OK")
 

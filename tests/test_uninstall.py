@@ -55,6 +55,19 @@ def _fake_home() -> Path:
         "mcp": {"trailmem": {"type": "local",
                              "command": [sys.executable, "-u", "-m", "trailmem.mcp_server"],
                              "environment": {"TRAILMEM_AGENT_TYPE": "kilo"}}}}))
+    ag = home / ".gemini" / "config" / "mcp_config.json"
+    ag.parent.mkdir(parents=True)
+    ag.write_text(json.dumps({"mcpServers": {
+        "trailmem": {"command": sys.executable,
+                     "args": ["-u", "-m", "trailmem.mcp_server"],
+                     "env": {"TRAILMEM_AGENT_TYPE": "antigravity"}},
+        "other-server": {"command": "keep-me"}}}))
+    (home / ".gemini" / "config" / "hooks.json").write_text(json.dumps({
+        "trailmem": {"PreInvocation": [{
+            "type": "command",
+            "command": f'"{sys.executable}" -m trailmem hook pre-invocation --agent antigravity',
+            "timeout": 10}]},
+        "user-group": {"Stop": [{"command": "notify.sh"}]}}))
     codex = home / ".codex" / "config.toml"
     codex.parent.mkdir(parents=True)
     codex.write_text(
@@ -68,6 +81,12 @@ def _fake_home() -> Path:
     cmds = home / ".claude" / "commands"
     cmds.mkdir(parents=True)
     (cmds / "tm-save.md").write_text("save command")
+    kilo_cmd = home / ".config" / "kilo" / "command"  # singular — live-verified
+    kilo_cmd.mkdir(parents=True)
+    (kilo_cmd / "tm-save.md").write_text("save command")
+    oc_cmd = home / ".config" / "opencode" / "commands"  # plural — live-verified
+    oc_cmd.mkdir(parents=True)
+    (oc_cmd / "tm-save.md").write_text("save command")
     prompts = home / ".codex" / "prompts"
     prompts.mkdir(parents=True)
     (prompts / "trailmem-save.md").write_text("save prompt")
@@ -118,6 +137,12 @@ def run() -> None:
             "SessionStart hook file must be removed"
         kilo = json.loads((home / ".config" / "kilo" / "kilo.jsonc").read_text())
         assert "trailmem" not in kilo["mcp"] and kilo["theme"] == "dark"
+        ag = json.loads((home / ".gemini" / "config" / "mcp_config.json").read_text())
+        assert "trailmem" not in ag["mcpServers"]
+        assert ag["mcpServers"]["other-server"]["command"] == "keep-me"
+        ag_hooks = json.loads((home / ".gemini" / "config" / "hooks.json").read_text())
+        assert "trailmem" not in ag_hooks and "user-group" in ag_hooks, \
+            "hook removal must be surgical — foreign named groups survive"
         codex = tomllib.loads((home / ".codex" / "config.toml").read_text())
         assert "trailmem" not in codex.get("mcp_servers", {})
         assert codex["mcp_servers"]["other"]["command"] == "keep-me"
@@ -125,6 +150,8 @@ def run() -> None:
         assert not (home / ".claude" / "skills" / "trailmem").exists()
         assert not (home / ".codex" / "skills" / "trailmem").exists()
         assert not (home / ".claude" / "commands" / "tm-save.md").exists()
+        assert not (home / ".config" / "kilo" / "command" / "tm-save.md").exists()
+        assert not (home / ".config" / "opencode" / "commands" / "tm-save.md").exists()
         assert not (home / ".codex" / "prompts" / "trailmem-save.md").exists()
         assert (home / ".trailmem" / "trailmem.db").exists(), \
             "default uninstall must NEVER touch the memory DB"

@@ -8,6 +8,7 @@ import hashlib
 import sqlite3
 
 from . import embeddings
+from .identity import resolve_project
 from .queries import edge_count, resolve_ref
 from .schema import has_vec
 from .store import EDGE_TYPES, EVENT_TYPES, ValidationError, now
@@ -25,6 +26,7 @@ def edit(
     archive_reason: str | None = None,
     link_to=None,
     edge_type: str = "related",
+    project: str | None = None,
     session_id: str | None = None,
 ) -> dict:
     m = resolve_ref(conn, ref)
@@ -59,6 +61,13 @@ def edit(
     if pinned is not None:
         conn.execute("UPDATE memories SET pinned = ? WHERE node_id = ?", (int(pinned), node_id))
         changed.append("pinned" if pinned else "unpinned")
+    if project is not None:
+        # Rescope only — content/hash/embedding untouched. resolve_project
+        # validates (abs path or 'global') and canonicalizes; 'global' → NULL.
+        new_project = resolve_project(project)
+        conn.execute("UPDATE memories SET project = ? WHERE node_id = ?",
+                     (new_project, node_id))
+        changed.append(f"project→{new_project or 'global'}")
 
     if content is not None:
         if len(content) < 50:

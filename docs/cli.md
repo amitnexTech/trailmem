@@ -39,6 +39,7 @@ trailmem edit <ref> --type lesson
 trailmem edit <ref> --pin            # or --no-pin
 trailmem edit <ref> --status archived --reason "why (min 20 chars)" --link-to <ref>
 trailmem edit <ref> --status completed --reason "what happened + evidence"   # task done (also: cancelled)
+trailmem edit <ref> --project /abs/path   # rescope a misfiled memory (or 'global'); content untouched
 
 # Archive (primary way to "remove" — preserves knowledge trail)
 trailmem archive <ref> --reason "replaced by QTcpSocket approach" --link-to <ref>
@@ -131,7 +132,9 @@ trailmem integrate
 # two cannot drift; the registry auto-discovers modules, so a new host = one file.
 # WRITE POLICY (narrow-write / wide-detect): after the y/N prompt, configs are
 # auto-written ONLY for hosts whose format is verified against the live binary —
-# Claude Code (via its own `claude mcp add`), Codex (TOML), Kiro, Kilo. Every OTHER
+# Claude Code (via its own `claude mcp add`), Codex (TOML), Kiro, Kilo, OpenCode,
+# Antigravity (all live-verified 2026-07-23; the pre-verification corruption is
+# history; Antigravity has NO `agy mcp` CLI — the file is the only path). Every OTHER
 # detected host gets the exact manual entry PRINTED instead of having its config
 # edited (hand-written entries corrupted Kilo and OpenCode configs before; flip a
 # host module's write flag once its format is verified). No silent changes.
@@ -141,16 +144,34 @@ trailmem integrate
 # `trailmem-mcp` script was removed in 0.1.7: Windows Smart App Control blocks unsigned
 # per-install launcher .exes, silently killing host-spawned servers. integrate upgrades
 # old trailmem-mcp entries to the python -m shape in place (env pins preserved).
-# EVERY entry pins TRAILMEM_AGENT_TYPE=<host> in the entry's env map — hosts spawn MCP
-# servers with a clean env (no session vars reach the server process; verified live for
-# Codex and Kilo), so config-entry env is the only reliable attribution path. Env-key name
+# EVERY entry pins TRAILMEM_AGENT_TYPE=<host> in the entry's env map — verified live:
+# Codex and Kiro spawn MCP servers with a CLEAN env, while Kilo passes its FULL parent
+# env down (including stale vars from before a config edit — a Kilo env change needs a
+# session restart to reach the server). Either way the config-entry pin is the only
+# reliable attribution path. Env-key name
 # is host-specific and schema-verified: Kilo + OpenCode use `environment`, everything else
 # `env` (Codex: TOML inline table; Claude Code: `claude mcp add -e`). Re-running integrate
-# UPGRADES an existing entry that lacks the env map instead of skipping it. Codex also gets
-# ~/.codex/prompts/trailmem-save.md → /prompts:trailmem-save (no MCP-prompt support there)
-# AND two hooks merged into ~/.codex/hooks.json: SessionStart for one welcome,
+# UPGRADES an existing entry that lacks the env map instead of skipping it. Codex paths all
+# follow $CODEX_HOME (official manual; default ~/.codex — self-report 0.145.0). Codex also
+# gets $CODEX_HOME/prompts/trailmem-save.md → /prompts:trailmem-save (no MCP-prompt surface
+# observed) AND two hooks merged into $CODEX_HOME/hooks.json: SessionStart for one welcome,
 # plus a TrailMem-only PreToolUse adapter that silently carries canonical
-# session_context into MCP arguments. Codex Stop is not used. See [[hooks]].
+# session_context into MCP arguments. Codex Stop is turn-scoped — never used. See [[hooks]].
+# Antigravity gets one named hook group "trailmem" in
+# ~/.gemini/config/hooks.json with two handlers: PreInvocation →
+# `trailmem hook pre-invocation` (fires before EVERY model call, so the
+# command dedups per conversationId — marker in ~/.trailmem/welcomed/ —
+# briefing injected via injectSteps once per conversation, bare {} after),
+# and PreToolUse (matcher call_mcp_tool) → `trailmem hook tool-context`,
+# which rewrites ONLY trailmem MCP calls: agy's `overwrite` shallow-merge
+# gets the full Arguments echoed back with session_context added; foreign
+# servers get a bare {}. Welcome stays stateless until the transport is
+# live-proven. Restart agy after install. See [[hooks]].
+# Kiro gets a SessionStart hook file at <cwd>/.kiro/hooks/ — WORKSPACE-scoped,
+# because Kiro never executes user-level ~/.kiro/hooks/ (verified live
+# 2026-07-23); run integrate once per Kiro workspace. Installs and uninstall
+# also delete the dead ~/.kiro/hooks/trailmem-session-start.json that ≤0.1.8
+# wrote. Kiro's hook payload carries an always-empty session_id → stateless.
 # Claude Code and Antigravity also get a statusline: if the host's settings.json
 # (~/.claude/settings.json / ~/.gemini/antigravity-cli/settings.json) has NO
 # statusLine, integrate writes `<python> -m trailmem statusline --agent <slug>`
@@ -197,7 +218,9 @@ trailmem uninstall
 # (Kiro/Kilo/OpenCode/Antigravity/Zed/Cursor/Windsurf), the Codex
 # `[mcp_servers.trailmem]` TOML table, the Claude Code registration (via `claude mcp
 # remove --scope user`), the usage skill at <skills>/trailmem/SKILL.md
-# (claude/codex/kilo/opencode), ~/.claude/commands/tm-save.md,
+# (claude/codex/kilo/opencode user-level; antigravity per-workspace at
+# <cwd>/.agents/skills/), ~/.claude/commands/tm-save.md,
+# ~/.config/kilo/command/tm-save.md, ~/.config/opencode/commands/tm-save.md,
 # ~/.codex/prompts/trailmem-save.md, and both TrailMem hook entries in
 # ~/.codex/hooks.json (foreign hooks untouched). The one-time .bak-trailmem backups are NOT
 # restored (the user may have edited configs since integrate); unparseable JSONC

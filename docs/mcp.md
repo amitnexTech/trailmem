@@ -267,6 +267,7 @@ Update existing memory or change its status.
 | archive_reason | string | No | — | REQUIRED for any status change (min 20 chars) |
 | link_to | string/array | No | — | Add edges during edit |
 | edge_type | string | No | "related" | Type for new edges |
+| project | string | No | — | Rescope a misfiled memory: absolute path or "global". Content/hash/embedding untouched — only the project column moves |
 
 **Response (plain text):**
 ```
@@ -281,6 +282,7 @@ Error:         "Cannot archive: no edges exist. Link to related memory first (tr
 - Content change → recompute content_hash + regenerate embedding + update FTS + set updated_at
 - Status change → validate archive_reason (≥20) + validate ≥1 edge exists
 - Title/type/pin → simple UPDATE + updated_at
+- Project change → same validation as store-time (absolute path or "global", canonicalized via realpath); simple UPDATE + updated_at
 
 ---
 
@@ -346,7 +348,7 @@ The server declares an `instructions` string (`mcp_server._INSTRUCTIONS`) at ini
 
 ### Hook Integration
 Beyond the 6 tools, the server exposes one MCP **prompt**, `save_session` (title “Save this session to memory”): a portable, zero-config way for any prompt-aware client (Claude Code, Cursor, VS Code, Windsurf) to have the live agent extract the session's decisions/lessons/tasks and call `trailmem_store`. It carries no side effects itself — it just returns the capture instruction. See [[hooks]] “Save-awareness” for the full trigger/reminder model. Session lifecycle hooks are documented separately in [[hooks]].
-Hook registration = per-host config (Claude Code settings.json, Kiro .kiro/settings/, Codex hooks.json).
+Hook registration = per-host config (Claude Code settings.json, Kiro `<workspace>/.kiro/hooks/` — workspace-scoped only, user-level `~/.kiro/hooks/` is never executed, Codex hooks.json).
 
 ---
 

@@ -1,10 +1,21 @@
 """Claude Code — verified host, gold-standard registration: its own
 `claude mcp add` CLI writes the config, so the host owns its schema and we
-never hand-edit settings.json. The explicit env pin keeps attribution correct
-even if a project-scope .mcp.json overrides the user-scope entry."""
+never hand-edit settings.json for MCP. The explicit env pin keeps attribution
+correct even if a project-scope .mcp.json overrides the user-scope entry.
 
+Hooks: SessionStart + SessionEnd groups in ~/.claude/settings.json "hooks".
+SessionStart MUST carry matcher "startup|clear" — without it the hook fires
+on ALL sources (startup, resume, clear, compact) and re-injects the briefing
+on every resume and every compaction (live-hit 2026-07-23 on the
+hand-installed matcherless group this artifact replaces). resume/compact
+continue a context that already holds the briefing; only startup/clear need
+it. install/remove own only the groups whose command runs `trailmem hook`;
+foreign hook groups in the same event arrays survive untouched."""
+
+import json
 import shutil
 import subprocess
+import sys
 
 from . import _util
 from ._util import Artifact, Host, SERVER_NAME
@@ -70,6 +81,97 @@ def _settings_path():
     return _util._HOME() / ".claude" / "settings.json"
 
 
+# ---- hooks (~/.claude/settings.json "hooks", one group per event) ----
+
+def _hook_groups() -> dict:
+    py = f'"{sys.executable}" -m trailmem hook'
+    return {
+        "SessionStart": {
+            "matcher": "startup|clear",
+            "hooks": [{"type": "command",
+                       "command": f"{py} session-start --agent claude",
+                       "timeout": 10}],
+        },
+        "SessionEnd": {
+            "hooks": [{"type": "command",
+                       "command": f"{py} session-stop --agent claude",
+                       "timeout": 5}],
+        },
+    }
+
+
+def _is_ours(group) -> bool:
+    return isinstance(group, dict) and any(
+        "trailmem hook" in h.get("command", "")
+        for h in group.get("hooks", []) if isinstance(h, dict))
+
+
+def _read_settings() -> dict:
+    path = _settings_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        raise RuntimeError(
+            f"{path} is not plain JSON — add the trailmem hooks manually")
+    return data if isinstance(data, dict) else {}
+
+
+def install_hook() -> str:
+    data = _read_settings()
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = data["hooks"] = {}
+    changed = False
+    for event, group in _hook_groups().items():
+        existing = hooks.get(event) if isinstance(hooks.get(event), list) else []
+        merged = [g for g in existing if not _is_ours(g)] + [group]
+        if merged != existing:
+            hooks[event] = merged
+            changed = True
+    if not changed:
+        return "hooks already installed"
+    _util.write_json(_settings_path(), data)
+    return ("hooks (SessionStart startup|clear + SessionEnd) written to "
+            f"{_settings_path()} — restart Claude Code")
+
+
+def remove_hook() -> "str | None":
+    data = _read_settings()
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return None
+    changed = False
+    for event in list(hooks):
+        if isinstance(hooks[event], list):
+            kept = [g for g in hooks[event] if not _is_ours(g)]
+            if kept != hooks[event]:
+                hooks[event] = kept
+                changed = True
+            if not kept:
+                del hooks[event]
+    if not changed:
+        return None
+    if not hooks:
+        del data["hooks"]
+    _util.write_json(_settings_path(), data)
+    return f"removed hooks from {_settings_path()}"
+
+
+def _hook_check() -> str:
+    try:
+        starts = _read_settings()["hooks"]["SessionStart"]
+        ours = [g for g in starts if _is_ours(g)]
+        if not ours:
+            return "not installed"
+        if ours[0].get("matcher") == "startup|clear":
+            return "installed"
+        return "no matcher (re-injects on resume) — run `trailmem integrate`"
+    except Exception:
+        return "not installed"
+
+
 # Lambdas resolve the module functions at call time so tests can monkeypatch
 # _mcp_remove (no live `claude` CLI in a sandbox home).
 HOST = Host(
@@ -80,6 +182,10 @@ HOST = Host(
                  lambda cmd, args: _mcp_install(cmd, args),
                  lambda: _mcp_remove(),
                  check=lambda: _mcp_check()),
+        Artifact("hooks",
+                 lambda cmd, args: install_hook(),
+                 lambda: remove_hook(),
+                 check=_hook_check),
         _util.skill_artifact(lambda: _util._HOME() / ".claude" / "skills"),
         Artifact("/tm-save command",
                  lambda cmd, args: _util.install_packaged(

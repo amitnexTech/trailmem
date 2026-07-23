@@ -1,14 +1,36 @@
-"""Codex — verified host. Four artifacts: MCP TOML table, the
-/prompts:trailmem-save custom prompt (Codex has no MCP-prompt support),
-the usage skill, and lifecycle hooks. SessionStart injects the welcome once;
-a targeted PreToolUse hook silently carries Codex's authoritative session id
-into TrailMem MCP calls. Codex has no SessionEnd event.
+"""Codex — verified host (live self-report 2026-07-23, codex-cli 0.145.0).
+
+Every path lives under $CODEX_HOME (official manual: config, hooks, prompts,
+skills; default ~/.codex). Four artifacts: the MCP TOML table
+([mcp_servers.trailmem] — `codex mcp add` exists, but the TOML append stays:
+it carries the upgrade/check logic, and TOML comments + strict unknown-key
+rejection are both verified), the /prompts:trailmem-save custom prompt (no
+MCP-prompt surface observed — 0.144.5 fake-server capture; 0.145.0 invocation
+unverified), the usage skill ($CODEX_HOME/skills, loaded lazily — verified
+live), and lifecycle hooks.
+
+Hooks: SessionStart is a REAL thread-start event (sources startup/resume/
+clear/compact; we match startup|clear only — resume/compact continue the same
+context). Stop is turn-scoped and SessionEnd does not exist, so no stop hook,
+ever. Hook stdout becomes model-visible developer context; Codex itself
+persists large output to <temp_dir>/hook_outputs/<session_id>/<uuid>.txt —
+the briefing found there is proof of injection, NOT TrailMem writing files.
+Hooks are trust-gated by hash ([hooks.state]; review via /hooks). The 0.145.0
+report could not inspect the real MCP child's env (its probe spawned from the
+delegated shell, which already had CODEX_THREAD_ID — proves nothing about the
+host's spawn); the earlier live check saw a clean env, so the targeted
+PreToolUse hook keeps carrying Codex's authoritative session id into TrailMem
+MCP calls — the payload beats env detection either way. Statusline is NOT
+scriptable (native component-id array only; a `thread-id` component exists),
+hence no statusline artifact.
 
 TOML editing is limited to appending/rewriting OUR known-shape table — the
 only edit the stdlib can do safely (tomllib reads, nothing writes)."""
 
 import json
+import os
 import sys
+from pathlib import Path
 
 from . import _util
 from ._util import Artifact, Host, SERVER_NAME
@@ -16,8 +38,13 @@ from ._util import Artifact, Host, SERVER_NAME
 ENV_LINE = 'env = { TRAILMEM_AGENT_TYPE = "codex" }'
 
 
+def _codex_home() -> Path:
+    override = os.environ.get("CODEX_HOME")
+    return Path(override) if override else _util._HOME() / ".codex"
+
+
 def _toml_path():
-    return _util._HOME() / ".codex" / "config.toml"
+    return _codex_home() / "config.toml"
 
 
 def _mcp_install(cmd, args):
@@ -95,7 +122,7 @@ def _mcp_remove():
 # ---- Hooks (~/.codex/hooks.json) ----
 
 def _hooks_path():
-    return _util._HOME() / ".codex" / "hooks.json"
+    return _codex_home() / "hooks.json"
 
 
 def _session_start_entry() -> dict:
@@ -201,12 +228,12 @@ def remove_hook():
 
 
 def _prompt_path():
-    return _util._HOME() / ".codex" / "prompts" / "trailmem-save.md"
+    return _codex_home() / "prompts" / "trailmem-save.md"
 
 
 HOST = Host(
     "Codex", "codex",
-    detect=lambda: (_util._HOME() / ".codex").is_dir(),
+    detect=lambda: _codex_home().is_dir(),
     artifacts=[
         Artifact("MCP registration",
                  lambda cmd, args: _mcp_install(cmd, args),
@@ -217,7 +244,7 @@ HOST = Host(
                      "commands/tm-save.md", _prompt_path(), "/prompts:trailmem-save"),
                  lambda: _util.remove_file(_prompt_path(), "/prompts:trailmem-save"),
                  check=_util.file_check(_prompt_path)),
-        _util.skill_artifact(lambda: _util._HOME() / ".codex" / "skills"),
+        _util.skill_artifact(lambda: _codex_home() / "skills"),
         Artifact("hooks",
                  lambda cmd, args: install_hook(),
                  lambda: remove_hook(),
