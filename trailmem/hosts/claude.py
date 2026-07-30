@@ -84,7 +84,7 @@ def _settings_path():
 # ---- hooks (~/.claude/settings.json "hooks", one group per event) ----
 
 def _hook_groups() -> dict:
-    py = f'"{sys.executable}" -m trailmem hook'
+    py = f'"{sys.executable}" -P -m trailmem hook'
     return {
         "SessionStart": {
             "matcher": "startup|clear",

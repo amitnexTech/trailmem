@@ -76,14 +76,14 @@ def _hook_group() -> dict:
     return {
         "PreInvocation": [{
             "type": "command",
-            "command": f'"{sys.executable}" -m trailmem hook pre-invocation --agent antigravity',
+            "command": f'"{sys.executable}" -P -m trailmem hook pre-invocation --agent antigravity',
             "timeout": 10,
         }],
         "PreToolUse": [{
             "matcher": "call_mcp_tool",
             "hooks": [{
                 "type": "command",
-                "command": f'"{sys.executable}" -m trailmem hook tool-context --agent antigravity',
+                "command": f'"{sys.executable}" -P -m trailmem hook tool-context --agent antigravity',
                 "timeout": 5,
             }],
         }],
