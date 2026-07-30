@@ -6,9 +6,10 @@
    sessionId, KIRO_SESSION_ID env) were disproven and must NOT resolve.
 2. MCP schema is strict/fails-closed: an entry with any unknown key is
    silently dropped by Kiro — our entry must stay exactly {command, args, env}.
-3. integrate writes/removes <workspace>/.kiro/hooks/trailmem-session-start.json
-   (Kiro only executes workspace hooks; user-level ~/.kiro/hooks/ is dead and
-   any legacy file there gets cleaned up on install/remove).
+3. integrate writes/removes ~/.kiro/hooks/trailmem-session-start.json — Kiro
+   MERGES user-level and workspace hooks (re-verified 2026-07-27, kiro-cli
+   2.14.2), so one user-level file covers every workspace and a ≤0.1.9
+   workspace copy is cleaned up on install (both firing = double briefing).
 """
 
 import io
@@ -86,24 +87,25 @@ def run() -> None:
     finally:
         sys.stdin = real_stdin
 
-    # --- 2. hook FILE lifecycle: workspace-scoped + legacy cleanup ---
+    # --- 2. hook FILE lifecycle: user-level + workspace-copy cleanup ---
     real_home, real_cwd = _util._HOME, os.getcwd()
     workspace = Path(HOME) / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     _util._HOME = lambda: Path(HOME)
     os.chdir(workspace)
     try:
-        path = workspace / ".kiro" / "hooks" / "trailmem-session-start.json"
-        legacy = Path(HOME) / ".kiro" / "hooks" / "trailmem-session-start.json"
+        path = Path(HOME) / ".kiro" / "hooks" / "trailmem-session-start.json"
+        ws = workspace / ".kiro" / "hooks" / "trailmem-session-start.json"
 
-        # a dead ≤0.1.8 user-level file gets cleaned up on install
-        legacy.parent.mkdir(parents=True, exist_ok=True)
-        legacy.write_text("{}")
+        # a ≤0.1.9 workspace file gets cleaned up on install — both scopes
+        # fire, so leaving it would inject the briefing twice
+        ws.parent.mkdir(parents=True, exist_ok=True)
+        ws.write_text("{}")
 
         msg = kiro.install_hook()
         assert "written" in msg, msg
-        assert path.exists(), "hook must land in the WORKSPACE .kiro/hooks"
-        assert not legacy.exists(), "dead user-level hook must be removed"
+        assert path.exists(), "hook must land in the USER-LEVEL .kiro/hooks"
+        assert not ws.exists(), "workspace copy must be removed"
         data = json.loads(path.read_text())
         assert data["hooks"][0]["trigger"] == "SessionStart"
         assert "trailmem hook session-start --agent kiro" in data["hooks"][0]["action"]["command"]
@@ -118,9 +120,9 @@ def run() -> None:
         path.write_text(json.dumps(data))
         assert "updated" in kiro.install_hook()
 
-        legacy.write_text("{}")  # remove must clear both scopes
+        ws.write_text("{}")  # remove must clear both scopes
         msg = kiro.remove_hook()
-        assert msg is not None and not path.exists() and not legacy.exists()
+        assert msg is not None and not path.exists() and not ws.exists()
         assert kiro.remove_hook() is None, "second removal is a no-op"
     finally:
         _util._HOME = real_home

@@ -1,4 +1,5 @@
-"""Kiro — verified host (live self-report 2026-07-23, kiro-cli 2.10.0).
+"""Kiro — verified host (live self-report 2026-07-23, kiro-cli 2.10.0;
+hook scope re-verified 2026-07-27 on kiro-cli 2.14.2).
 
 MCP: standard mcpServers map at ~/.kiro/settings/mcp.json, but the schema is
 STRICT and fails closed — an entry carrying ANY unrecognized key is silently
@@ -13,12 +14,15 @@ stateless by design. A real conversationId exists only inside
 against the identity contract).
 
 Hooks: SessionStart only (like Codex, no SessionEnd; "Stop" fires per turn —
-a no-per-turn-hooks violation for a session-boundary hook). Kiro executes
-ONLY <workspace>/.kiro/hooks/<id>.json — user-level ~/.kiro/hooks/ is dead
-(proven via tee-capture across restarts: workspace fired, user-level never).
-Hence the hook is a per-workspace artifact written to cwd, and installs clean
-up the dead user-level file earlier releases wrote. Hooks are not hot-loaded;
-they activate on the next session start.
+a no-per-turn-hooks violation for a session-boundary hook). Kiro MERGES both
+hook dirs: user-level ~/.kiro/hooks/<id>.json AND <workspace>/.kiro/hooks/,
+each firing independently (proven 2026-07-27 on 2.14.2: two marker hooks, one
+per scope, both appeared in the same fresh session). The earlier claim that
+only the workspace dir executes (tee-capture, 2.10.0) is therefore wrong for
+current Kiro. So the hook is installed ONCE at user level and covers every
+workspace; installs delete a workspace copy, because with both present the
+briefing is injected twice per session. Hooks are not hot-loaded; they
+activate on the next session start.
 """
 
 import json
@@ -37,19 +41,20 @@ def _entry(cmd, args):
     return _util.std_entry("kiro", cmd, args)
 
 
-# ---- SessionStart hook (<workspace>/.kiro/hooks/trailmem-session-start.json)
+# ---- SessionStart hook (~/.kiro/hooks/trailmem-session-start.json)
 # Unlike Claude Code/Codex, Kiro has no single shared hooks registry file —
 # each hook is its own file (v1 hook format: one JSON doc with a "hooks"
-# list), and only the WORKSPACE hooks dir is executed. So this installs/
-# removes ONE dedicated file under cwd, per workspace.
+# list). Both the user-level and the workspace dir are executed and merged,
+# so one user-level file covers every workspace; a workspace copy would make
+# the briefing fire twice, hence install removes it.
 
 def _hook_path():
-    return Path.cwd() / ".kiro" / "hooks" / "trailmem-session-start.json"
-
-
-def _legacy_hook_path():
-    # ≤0.1.8 wrote here; Kiro never executes user-level hooks — dead file.
     return _util._HOME() / ".kiro" / "hooks" / "trailmem-session-start.json"
+
+
+def _workspace_hook_path():
+    # ≤0.1.9 wrote here (when only workspace hooks were believed to run).
+    return Path.cwd() / ".kiro" / "hooks" / "trailmem-session-start.json"
 
 
 def _hook_doc() -> dict:
@@ -67,27 +72,27 @@ def _hook_doc() -> dict:
     }
 
 
-def _drop_legacy() -> str:
-    legacy = _legacy_hook_path()
-    if not legacy.exists():
+def _drop_workspace() -> str:
+    stale = _workspace_hook_path()
+    if not stale.exists():
         return ""
-    legacy.unlink()
-    return f"; removed dead user-level hook ({legacy} — Kiro never runs it)"
+    stale.unlink()
+    return (f"; removed workspace hook ({stale}) — both scopes fire, so it "
+            "would inject the briefing twice")
 
 
 def install_hook() -> str:
     path = _hook_path()
     doc = _hook_doc()
-    legacy_note = _drop_legacy()
-    note = ("; per-workspace — re-run `trailmem integrate` in other Kiro "
-            "workspaces") + legacy_note
+    stale_note = _drop_workspace()
+    note = "; user-level — covers every Kiro workspace" + stale_note
     if path.exists():
         try:
             existing = json.loads(path.read_text())
         except json.JSONDecodeError:
             existing = None
         if existing == doc:
-            return "SessionStart hook already installed" + legacy_note
+            return "SessionStart hook already installed" + stale_note
         _util.write_json(path, doc)
         return f"SessionStart hook updated at {path}" + note
     _util.write_json(path, doc)
@@ -95,7 +100,7 @@ def install_hook() -> str:
 
 
 def remove_hook() -> "str | None":
-    removed = [p for p in (_hook_path(), _legacy_hook_path()) if p.exists()]
+    removed = [p for p in (_hook_path(), _workspace_hook_path()) if p.exists()]
     for p in removed:
         p.unlink()
     if not removed:
@@ -108,7 +113,7 @@ HOST = Host(
     detect=lambda: (_util._HOME() / ".kiro").is_dir(),
     artifacts=[
         _util.json_mcp_artifact(_path, "mcpServers", _entry, write=True),
-        Artifact("SessionStart hook (workspace)",
+        Artifact("SessionStart hook",
                  lambda cmd, args: install_hook(),
                  lambda: remove_hook(),
                  check=_util.file_check(_hook_path)),
