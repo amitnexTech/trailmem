@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -26,6 +27,32 @@ from ..identity import SessionContext
 SERVER_NAME = "trailmem"
 
 _HOME = Path.home  # single indirection point — tests monkeypatch this
+
+
+def safe_path_flag() -> str:
+    """`-P` on 3.11+, `-I` on 3.10 — the flag that keeps cwd off sys.path.
+
+    Load-bearing, not cosmetic. `-m` puts the launching process's cwd at
+    sys.path[0], so an agent working inside a checkout of THIS project imports
+    the working tree instead of the installed package: it silently runs
+    uncommitted code, and because content_hash covers absolute paths, the
+    memories it writes never dedupe against the installed copy's. Live-hit
+    2026-07-29 across every registered host at once.
+
+    `-P` arrived in 3.11 and 3.10 rejects it outright, which would kill the
+    server on the oldest supported interpreter. `-I` exists everywhere and also
+    drops cwd; it additionally ignores PYTHON* env vars, which trailmem never
+    reads — the TRAILMEM_* overrides still arrive (verified 2026-07-29)."""
+    return "-P" if sys.version_info >= (3, 11) else "-I"
+
+
+def hook_python() -> str:
+    """Quoted interpreter + isolation flag, for hook command lines.
+
+    Hosts run hook commands through a shell from the workspace cwd, so the same
+    shadowing that hits the MCP server hits every hook. Quoted because the
+    interpreter path may contain spaces (Windows)."""
+    return f'"{sys.executable}" {safe_path_flag()}'
 
 
 @dataclass

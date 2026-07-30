@@ -129,7 +129,7 @@ welcome and save-awareness intentionally run stateless.
 Every MCP entry must launch the current environment's interpreter:
 
 ```text
-<python> -u -m trailmem.mcp_server
+<python> -P -u -m trailmem.mcp_server
 ```
 
 Every entry must pin:
@@ -221,7 +221,7 @@ Required checks:
 1. Adapter module appears in `HOST_BY_AGENT`.
 2. Agent slug is unique and valid.
 3. MCP entry pins the correct `TRAILMEM_AGENT_TYPE`.
-4. Launch command is `<python> -u -m trailmem.mcp_server`.
+4. Launch command is `<python> -P -u -m trailmem.mcp_server`.
 5. Native payload/env maps to the expected canonical context and project.
 6. Shared table-driven adapter conformance checks pass for the declared fields.
 7. Hook and MCP context produce the same namespaced session key.

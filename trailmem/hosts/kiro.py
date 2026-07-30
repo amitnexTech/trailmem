@@ -26,7 +26,6 @@ activate on the next session start.
 """
 
 import json
-import sys
 from pathlib import Path
 
 from . import _util
@@ -65,7 +64,7 @@ def _hook_doc() -> dict:
             "trigger": "SessionStart",
             "action": {
                 "type": "command",
-                "command": f'"{sys.executable}" -P -m trailmem hook session-start --agent kiro',
+                "command": f'{_util.hook_python()} -m trailmem hook session-start --agent kiro',
                 "timeout": 15,
             },
         }],

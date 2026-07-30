@@ -139,8 +139,8 @@ trailmem integrate
 # edited (hand-written entries corrupted Kilo and OpenCode configs before; flip a
 # host module's write flag once its format is verified). No silent changes.
 # (Manual fallback: `claude mcp add trailmem
-# -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server`.)
-# Server launch is ALWAYS `<python> -u -m trailmem.mcp_server` — the generated
+# -e TRAILMEM_AGENT_TYPE=claude -- <python> -P -u -m trailmem.mcp_server`.)
+# Server launch is ALWAYS `<python> -P -u -m trailmem.mcp_server` — the generated
 # `trailmem-mcp` script was removed in 0.1.7: Windows Smart App Control blocks unsigned
 # per-install launcher .exes, silently killing host-spawned servers. integrate upgrades
 # old trailmem-mcp entries to the python -m shape in place (env pins preserved).

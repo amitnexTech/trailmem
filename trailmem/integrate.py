@@ -22,17 +22,19 @@ import sys
 
 from .console import sym
 from .hosts import HOSTS
-from .hosts._util import SERVER_NAME  # noqa: F401 — public re-export
+from .hosts._util import SERVER_NAME, safe_path_flag  # noqa: F401 — public re-export
+
 
 def mcp_command() -> tuple[str, list[str]]:
-    """Server launch shape: current Python + `-u -m trailmem.mcp_server`.
+    """Server launch shape: python + `<safe-path> -u -m trailmem.mcp_server`.
 
     NEVER a generated `trailmem-mcp` launcher: Windows Smart App Control
     blocks per-install unsigned .exes (Event Viewer CodeIntegrity 3077), so a
     host-spawned server dies silently with no fallback. sys.executable is the
     venv python that has trailmem installed (uv tool / pipx / pip alike), and
-    `-u` keeps stdio unbuffered for MCP framing."""
-    return sys.executable, ["-u", "-m", "trailmem.mcp_server"]
+    `-u` keeps stdio unbuffered for MCP framing. The isolation flag is
+    mandatory — see hosts._util.safe_path_flag() for why."""
+    return sys.executable, [safe_path_flag(), "-u", "-m", "trailmem.mcp_server"]
 
 
 def run() -> int:

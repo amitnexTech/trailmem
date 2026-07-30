@@ -29,7 +29,6 @@ only edit the stdlib can do safely (tomllib reads, nothing writes)."""
 
 import json
 import os
-import sys
 from pathlib import Path
 
 from . import _util
@@ -129,13 +128,13 @@ def _session_start_entry() -> dict:
     # python -m launch for the same reason as mcp_command(); the exe path is
     # quoted because hosts run hook commands through a shell.
     return {"type": "command",
-            "command": f'"{sys.executable}" -P -m trailmem hook session-start --agent codex',
+            "command": f'{_util.hook_python()} -m trailmem hook session-start --agent codex',
             "timeout": 10, "statusMessage": "Loading trailmem briefing"}
 
 
 def _tool_context_entry() -> dict:
     return {"type": "command",
-            "command": f'"{sys.executable}" -P -m trailmem hook tool-context --agent codex',
+            "command": f'{_util.hook_python()} -m trailmem hook tool-context --agent codex',
             "timeout": 5}
 
 

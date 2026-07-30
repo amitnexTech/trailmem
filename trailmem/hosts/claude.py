@@ -15,7 +15,6 @@ foreign hook groups in the same event arrays survive untouched."""
 import json
 import shutil
 import subprocess
-import sys
 
 from . import _util
 from ._util import Artifact, Host, SERVER_NAME
@@ -84,7 +83,7 @@ def _settings_path():
 # ---- hooks (~/.claude/settings.json "hooks", one group per event) ----
 
 def _hook_groups() -> dict:
-    py = f'"{sys.executable}" -P -m trailmem hook'
+    py = f'{_util.hook_python()} -m trailmem hook'
     return {
         "SessionStart": {
             "matcher": "startup|clear",

@@ -50,7 +50,7 @@ trailmem integrate      # detects installed agent hosts, asks before writing any
 
 `trailmem integrate` auto-detects nine hosts: **Claude Code, Codex, Kiro, Kilo, OpenCode, Antigravity, Zed, Cursor, Windsurf**. It shows what it found, asks once (y/N), backs up every config it touches (`.bak-trailmem`), and skips hosts that are already registered. **Configs are auto-written only for hosts whose format is verified against the live binary** — Claude Code (via its own `claude mcp add`), Codex, Kiro, Kilo, OpenCode, Antigravity. For the other detected hosts it prints the exact entry to paste instead of editing their config (hand-written entries have corrupted host configs before; a host is promoted to auto-write once its format is verified). It also never rewrites a config it can't parse losslessly (JSONC with comments gets the manual entry printed too). On Claude Code, Kilo, and OpenCode it installs a `/tm-save` slash command; on Codex a `/prompts:trailmem-save` prompt and a SessionStart hook (`~/.codex/hooks.json` — trust it via `/hooks` after restarting Codex); on Kiro a SessionStart hook (`~/.kiro/hooks/` — user-level, one install covers every workspace); on Antigravity a deduped PreInvocation welcome hook (`~/.gemini/config/hooks.json` — injects the briefing once per conversation, restart `agy` after install). On hosts that read Agent Skills it installs a lazy-loaded `trailmem` usage skill so agents learn the tool semantics without reading source — user-level on Claude Code, Codex, Kilo, OpenCode; per-workspace on Antigravity (`<workspace>/.agents/skills/`, the only non-builtin skills dir agy reads — re-run `integrate` per workspace).
 
-> **Windows note:** the MCP server is registered as `python -u -m trailmem.mcp_server` — never as a generated `.exe`. Windows **Smart App Control** silently blocks unsigned per-install launcher `.exe`s (the kind pip/uv generate), which kills a host-spawned server with no error anywhere. If the `trailmem` CLI itself is blocked by SAC, run it as `python -m trailmem` from the environment it's installed into.
+> **Windows note:** the MCP server is registered as `python -P -u -m trailmem.mcp_server` — never as a generated `.exe`. Windows **Smart App Control** silently blocks unsigned per-install launcher `.exe`s (the kind pip/uv generate), which kills a host-spawned server with no error anywhere. If the `trailmem` CLI itself is blocked by SAC, run it as `python -m trailmem` from the environment it's installed into.
 
 ### Saving a session before you exit
 
@@ -76,11 +76,11 @@ Clients with no prompt support (e.g. **Codex**, **aider**) use the plain-text pa
 
 Prefer manual MCP registration? Each host has its own mechanism:
 
-The server launch command everywhere is `<python> -u -m trailmem.mcp_server`, where `<python>` is the interpreter trailmem is installed into (print it: `trailmem doctor` shows the home; or `python -c "import sys; print(sys.executable)"` inside that environment). Add `TRAILMEM_AGENT_TYPE=<host>` to the entry's env so memories are attributed correctly.
+The server launch command everywhere is `<python> -P -u -m trailmem.mcp_server`, where `<python>` is the interpreter trailmem is installed into (print it: `trailmem doctor` shows the home; or `python -c "import sys; print(sys.executable)"` inside that environment). Add `TRAILMEM_AGENT_TYPE=<host>` to the entry's env so memories are attributed correctly.
 
 | Host | Manual registration |
 |------|--------------------|
-| Claude Code | `claude mcp add trailmem -e TRAILMEM_AGENT_TYPE=claude -- <python> -u -m trailmem.mcp_server` |
+| Claude Code | `claude mcp add trailmem -e TRAILMEM_AGENT_TYPE=claude -- <python> -P -u -m trailmem.mcp_server` |
 | Codex | add an `[mcp_servers.trailmem]` table to `$CODEX_HOME/config.toml` (default `~/.codex`) |
 | Kiro | add `trailmem` under `mcpServers` in `~/.kiro/settings/mcp.json` |
 | Kilo | add `trailmem` under `mcp` in `~/.config/kilo/kilo.jsonc` as `{"type":"local","command":["<python>","-u","-m","trailmem.mcp_server"]}` (kilo 7.x format) |
@@ -95,7 +95,7 @@ The server launch command everywhere is `<python> -u -m trailmem.mcp_server`, wh
 Trailmem works with **any agent that speaks MCP** — Cursor, Windsurf, Cline, Zed, Gemini CLI, or anything newer. `trailmem integrate` only automates the hosts above; for everything else, register it yourself. You need exactly three facts:
 
 1. **Transport:** stdio (no URL, no port, no HTTP).
-2. **Command:** `<python> -u -m trailmem.mcp_server` — the interpreter trailmem is installed into, launched as a module. There is deliberately no `trailmem-mcp` executable: Windows Smart App Control silently blocks per-install unsigned launcher `.exe`s, which killed host-spawned servers with no error. `python -m` needs no launcher and works on every OS.
+2. **Command:** `<python> -P -u -m trailmem.mcp_server` — the interpreter trailmem is installed into, launched as a module. There is deliberately no `trailmem-mcp` executable: Windows Smart App Control silently blocks per-install unsigned launcher `.exe`s, which killed host-spawned servers with no error. `python -m` needs no launcher and works on every OS.
 3. **Identity:** set `TRAILMEM_AGENT_TYPE=<lowercase-agent-slug>` for attribution. If the host can expose a stable conversation ID to child processes, also set `TRAILMEM_SESSION_ID=<real-id>`.
 
 Most agents use a JSON block shaped like this (key name varies — `mcpServers`, `mcp`, `servers`):
@@ -105,7 +105,7 @@ Most agents use a JSON block shaped like this (key name varies — `mcpServers`,
   "mcpServers": {
     "trailmem": {
       "command": "/path/to/python",
-      "args": ["-u", "-m", "trailmem.mcp_server"],
+      "args": ["-P", "-u", "-m", "trailmem.mcp_server"],
       "env": {
         "TRAILMEM_AGENT_TYPE": "myagent",
         "TRAILMEM_SESSION_ID": "the-hosts-real-session-id"

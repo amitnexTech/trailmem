@@ -28,9 +28,16 @@ def run() -> None:
     from trailmem import integrate
 
     cmd, args = integrate.mcp_command()
+    flag = "-P" if sys.version_info >= (3, 11) else "-I"
     assert cmd == sys.executable, cmd
-    assert args == ["-u", "-m", "trailmem.mcp_server"], args
+    assert args == [flag, "-u", "-m", "trailmem.mcp_server"], args
     assert "trailmem-mcp" not in " ".join([cmd, *args])
+
+    # The isolation flag is load-bearing: without it `-m` puts the host's cwd
+    # on sys.path and a checkout of this repo shadows the installed package.
+    from trailmem.hosts import _util as _hu
+    assert _hu.safe_path_flag() == flag, _hu.safe_path_flag()
+    assert _hu.hook_python().endswith(f" {flag}"), _hu.hook_python()
 
     # `trailmem-mcp` script must be gone from pyproject; `trailmem` must stay.
     pyproject = Path(__file__).parent.parent / "pyproject.toml"

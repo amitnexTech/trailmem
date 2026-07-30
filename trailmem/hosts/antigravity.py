@@ -39,7 +39,6 @@ other extra surface is the WORKSPACE usage skill (<cwd>/.agents/skills/ —
 the sole non-builtin skills dir agy reads)."""
 
 import json
-import sys
 from pathlib import Path
 
 from . import _util
@@ -76,14 +75,14 @@ def _hook_group() -> dict:
     return {
         "PreInvocation": [{
             "type": "command",
-            "command": f'"{sys.executable}" -P -m trailmem hook pre-invocation --agent antigravity',
+            "command": f'{_util.hook_python()} -m trailmem hook pre-invocation --agent antigravity',
             "timeout": 10,
         }],
         "PreToolUse": [{
             "matcher": "call_mcp_tool",
             "hooks": [{
                 "type": "command",
-                "command": f'"{sys.executable}" -P -m trailmem hook tool-context --agent antigravity',
+                "command": f'{_util.hook_python()} -m trailmem hook tool-context --agent antigravity',
                 "timeout": 5,
             }],
         }],
