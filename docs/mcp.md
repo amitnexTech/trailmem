@@ -348,7 +348,7 @@ The server declares an `instructions` string (`mcp_server._INSTRUCTIONS`) at ini
 
 ### Hook Integration
 Beyond the 6 tools, the server exposes one MCP **prompt**, `save_session` (title “Save this session to memory”): a portable, zero-config way for any prompt-aware client (Claude Code, Cursor, VS Code, Windsurf) to have the live agent extract the session's decisions/lessons/tasks and call `trailmem_store`. It carries no side effects itself — it just returns the capture instruction. See [[hooks]] “Save-awareness” for the full trigger/reminder model. Session lifecycle hooks are documented separately in [[hooks]].
-Hook registration = per-host config (Claude Code settings.json, Kiro `<workspace>/.kiro/hooks/` — workspace-scoped only, user-level `~/.kiro/hooks/` is never executed, Codex hooks.json).
+Hook registration = per-host config (Claude Code settings.json, Kiro `~/.kiro/hooks/` — user-level, and `<workspace>/.kiro/hooks/` is merged with it so trailmem installs only the user-level file, Codex hooks.json).
 
 ---
 

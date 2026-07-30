@@ -193,9 +193,10 @@ targeted pre-tool hook matching only TrailMem MCP calls:
 
 It must inject the canonical `session_context` into tool input without adding
 model-visible memory content. Codex is the reference for this transport;
-Kiro is the reference for a dedicated per-workspace SessionStart hook file
-(only `<workspace>/.kiro/hooks/` executes; user-level `~/.kiro/hooks/` is
-dead). See [[hooks]].
+Kiro is the reference for a dedicated one-file-per-hook SessionStart artifact
+(both `~/.kiro/hooks/` and `<workspace>/.kiro/hooks/` execute and are merged,
+so trailmem installs the user-level one and deletes any workspace copy to
+avoid a double briefing). See [[hooks]].
 
 ## Optional Host Artifacts
 

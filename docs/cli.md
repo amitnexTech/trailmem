@@ -167,11 +167,13 @@ trailmem integrate
 # gets the full Arguments echoed back with session_context added; foreign
 # servers get a bare {}. Welcome stays stateless until the transport is
 # live-proven. Restart agy after install. See [[hooks]].
-# Kiro gets a SessionStart hook file at <cwd>/.kiro/hooks/ — WORKSPACE-scoped,
-# because Kiro never executes user-level ~/.kiro/hooks/ (verified live
-# 2026-07-23); run integrate once per Kiro workspace. Installs and uninstall
-# also delete the dead ~/.kiro/hooks/trailmem-session-start.json that ≤0.1.8
-# wrote. Kiro's hook payload carries an always-empty session_id → stateless.
+# Kiro gets a SessionStart hook file at ~/.kiro/hooks/ — USER-LEVEL, one
+# install covers every workspace, because Kiro executes and merges BOTH
+# ~/.kiro/hooks/ and <workspace>/.kiro/hooks/ (verified live 2026-07-27 on
+# kiro-cli 2.14.2; the 2026-07-23 "user-level is dead" finding on 2.10.0 no
+# longer holds). Installs and uninstall also delete the workspace copy that
+# ≤0.1.9 wrote — with both present the briefing fires twice per session.
+# Kiro's hook payload carries an always-empty session_id → stateless.
 # Claude Code and Antigravity also get a statusline: if the host's settings.json
 # (~/.claude/settings.json / ~/.gemini/antigravity-cli/settings.json) has NO
 # statusLine, integrate writes `<python> -m trailmem statusline --agent <slug>`
