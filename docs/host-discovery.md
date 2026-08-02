@@ -1,5 +1,7 @@
 # Host Discovery — self-report prompt for a new agent host
 
+Evidence-backed prompt for discovering a new host application's session identity, MCP registration, hooks, prompts, statusline, and skills mechanics before codifying a TrailMem adapter.
+
 **Status:** REFERENCE
 
 TrailMem integrates a new host in two steps: (1) the host agent itself runs
@@ -134,3 +136,9 @@ The maintainer maps the report onto a `hosts/<host>.py` module:
 Every claim marked UNVERIFIED stays out of code until verified. The module
 then goes through the [[host-integration]] Verification Checklist and the
 test suites before anything is published.
+
+## Related
+
+- [[host-integration]] — codification rules and verification checklist for turning a host discovery report into `trailmem/hosts/<host>.py`.
+- [[hooks]] — session-start hook behavior and lifecycle constraints used by supported host adapters.
+- [[mcp]] — stdio MCP surface that host registrations must preserve.
