@@ -15,6 +15,8 @@ contributions that keep it that way are very welcome.
   of the change to the problem.
 - **No telemetry, ever.** trailmem never phones home. Any change that emits
   analytics or contacts a remote server will be rejected.
+- **Respectful collaboration.** Follow the [Code of Conduct](CODE_OF_CONDUCT.md)
+  in all project spaces.
 
 ## Development setup
 
@@ -35,6 +37,7 @@ you never touch your real memory database.
 
 - Run both test scripts; they must pass.
 - Keep commits focused and messages descriptive (why, not just what).
+- Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 - If you add a new MCP agent host to `trailmem integrate`, add it as one row
   in the `JSON_HOSTS` table (or a detect/integrate pair for non-JSON config),
   and test it against a copy of a real config — never overwrite existing

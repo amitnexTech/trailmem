@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trailmem"
-version = "0.1.12"
+version = "0.1.13"
 description = "Local-first, graph-linked persistent memory for AI coding agents (MCP server + CLI)"
 readme = "README.md"
 license = "MIT"
@@ -31,7 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/amit/trailmem"
+Homepage = "https://github.com/amitnexTech/trailmem"
+Repository = "https://github.com/amitnexTech/trailmem"
+Issues = "https://github.com/amitnexTech/trailmem/issues"
 
 # Server script deliberately absent: Windows Smart App Control blocks
 # per-install unsigned launcher .exes, silently killing a host-spawned server.

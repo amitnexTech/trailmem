@@ -196,7 +196,13 @@ trailmem help                # or: trailmem <command> --help
 
 ## Status
 
-v0.1.0 is [live on PyPI](https://pypi.org/project/trailmem/). Core implemented and tested: schema, store/dedup, query/show, welcome, MCP server, CLI, hooks, model management, loopback dashboard, host integration. The design contract lives in [`docs/`](docs/index.md) — schema, welcome lifecycle, duplicate policy, evolution rules, CLI/MCP surfaces, hooks, seeding playbook, and the dashboard contract.
+v0.1.13 is [live on PyPI](https://pypi.org/project/trailmem/). Core implemented and tested: schema, store/dedup, query/show, welcome, MCP server, CLI, hooks, model management, loopback dashboard, and host integration. The design contract lives in [`docs/`](docs/index.md) — schema, welcome lifecycle, duplicate policy, evolution rules, CLI/MCP surfaces, hooks, seeding playbook, and the dashboard contract.
+
+## Community
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request,
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
 ## License
 
